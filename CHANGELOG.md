@@ -8,6 +8,16 @@
   `identityGuardMode` (ships `log_only`), independent of the number guard.
 - New audit actions `blocked_identity` and `observed_identity` on the same table and channel.
 - No migration.
+- Verified end-to-end on the local yam-shop dev shop (Shopware 6.6.10.18, PHP 8.3, `APP_ENV=prod`, real DAL
+  and Admin API, integration labelled `JTL Connector`): `observed_identity` in `log_only` (the connector's
+  e-mail was applied and recorded); `blocked_identity` in `enforce` over `PATCH /api/customer/{id}` for
+  `email` alone (the `title` of the same write was still applied), for `email` + `first_name` + `last_name`
+  together (three rows, all three values kept), and over the connector's own `POST /api/_action/sync` batch
+  swapping two customers' e-mails (both kept, two rows); a name-only change was applied and recorded as
+  `observed_identity` under the default `on_email_swap` policy, kept under `always`, and neither guarded nor
+  recorded under `off`. Writes from a second Admin API integration and from an admin user changed e-mail and
+  name and produced no audit row (only the "not identified as the connector" debug line). The 001 number
+  guard still blocked a `customer_number` update in the same build.
 
 ## 1.0.1 — 2026-09-07
 
