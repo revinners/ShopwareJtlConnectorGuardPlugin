@@ -24,5 +24,15 @@
             <argument type="service" id="monolog.logger.jtl_connector_guard"/>
             <argument type="service" id="Doctrine\DBAL\Connection"/>
         </service>
+
+        <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Subscriber\CustomerNumberWriteProtection">
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider"/>
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSourceDetector"/>
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader"/>
+            <argument type="service" id="Shopware\Core\System\NumberRange\ValueGenerator\NumberRangeValueGeneratorInterface"/>
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger"/>
+            <argument type="service" id="monolog.logger.jtl_connector_guard"/>
+            <tag name="kernel.event_subscriber"/>
+        </service>
     </services>
 </container>
