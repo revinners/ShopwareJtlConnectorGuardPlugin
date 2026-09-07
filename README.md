@@ -15,9 +15,15 @@ This plugin makes Shopware the owner of the number:
 - **Connector-created customers:** the supplied number is replaced by one reserved from the shop's own
   `customer` number range (for the customer's sales channel), exactly like a storefront registration.
 - **Audit trail:** every intervention is written to the Monolog channel `jtl_connector_guard`
-  (`var/log/jtl_connector_guard_<env>.log`, also propagated to the main log) **and** to the table
-  `revinners_jtl_guard_log` (DAL entity `revinners_jtl_guard_log`, searchable via
-  `POST /api/search/revinners-jtl-guard-log`).
+  (`var/log/jtl_connector_guard_<env>.log`) **and** to the table `revinners_jtl_guard_log`
+  (DAL entity `revinners_jtl_guard_log`, searchable via `POST /api/search/revinners-jtl-guard-log`).
+  Those two are the reliable sinks. Shopware's prod Monolog config runs the `main` handler as
+  `fingers_crossed` with `action_level: error`, so an `info` line only reaches `prod.log` if an
+  *error* also happens in the same request — the guard's routine `blocked_update` /
+  `remapped_create` lines will not show up there. Only the guard's own `error` lines (an
+  internal failure, or a logging sink that itself failed — see *Implementation notes*) are
+  expected to land in the main log; treat `jtl_connector_guard_<env>.log` and the DB table as
+  the sources of truth for auditing.
 
 ### How connector writes are identified
 
@@ -39,10 +45,29 @@ else — admin users, storefront, CLI, imports, other integrations — is never 
 
 ### Rollout
 
-1. Install and activate — it starts in `log_only`.
-2. Trigger a push (change a linked customer's Kundengruppe in Wawi) and check the log / table for a
+1. Before installing on a shop, confirm the connector's integration label/id in
+   Settings → System → Integrations:
+   - **yam-shop.de:** the production integration is labelled `JTL Connector`. The default
+     `integrationLabels` (`JTL-Connector`) already matches it thanks to normalisation (matching
+     ignores case, whitespace and punctuation), but set `integrationIds` to
+     `019b8946ccc67767b9fb8cb524300ba1` as well so detection does not depend on the label
+     surviving a future rename.
+   - **ducati-world24.com:** verify the integration label/id in Settings → System → Integrations
+     before install; do not assume it matches the default.
+2. Install and activate — it starts in `log_only`. In this mode the guard only *observes*:
+   Wawi still overwrites `customer_number` while you watch, nothing is blocked yet. Keep this
+   window short — a few days of real pushes is enough to confirm detection — then switch to
+   `enforce`; leaving `log_only` on longer does not protect any customer number.
+3. Trigger a push (change a linked customer's Kundengruppe in Wawi) and check the log / table for a
    `blocked_update` row with the attempted number.
-3. Switch `mode` to `enforce`, repeat: the number must stay, the group must still change.
+4. Switch `mode` to `enforce`, repeat: the number must stay, the group must still change.
+5. Roll out to **one shop first**. Watch `revinners_jtl_guard_log` and the channel file
+   (`var/log/jtl_connector_guard_<env>.log`) for a few days of real traffic before installing on
+   the second shop.
+6. Both shops require PHP >= 8.2 (see `composer.json`). yam-shop.de is verified on PHP 8.3; check
+   the running PHP version on ducati-world24.com before install.
+7. Release checklist: when releasing, bump `version` in `composer.json` and create the git tag
+   with the same value — Composer ignores a tag whose `composer.json` version disagrees.
 
 ### Implementation notes
 
@@ -52,6 +77,10 @@ else — admin users, storefront, CLI, imports, other integrations — is never 
   Re-verify this on every Shopware minor upgrade.
 - The audit row is inserted with plain DBAL inside the event (no nested DAL write) and can never
   break the customer write.
+- Both the channel logger call and the DB insert are wrapped independently, and every error/debug
+  line the guard emits falls back to Shopware's main `logger` service if the `jtl_connector_guard`
+  channel itself cannot be written (e.g. its log file cannot be opened). No failure of either
+  logger can propagate out of `onEntityWrite()` and into the DAL write.
 
 ## Development
 

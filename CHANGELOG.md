@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.1 — 2026-09-07
+
+- Fix: error paths no longer depend on the channel logger. `GuardLogger` and
+  `CustomerNumberWriteProtection` now fall back to Shopware's main `logger` service when the
+  `jtl_connector_guard` channel logger itself fails (e.g. its log file cannot be opened), so a
+  broken channel logger can never throw into the customer DAL write.
+- Docs: README corrected on where the audit trail actually lands (the `main` log is
+  `fingers_crossed` in prod and only receives error lines, not the routine `blocked_update` /
+  `remapped_create` entries) and the Rollout section now covers per-shop integration
+  identification, the `log_only` observation window, staged rollout, PHP version requirements,
+  and the release version/tag checklist.
+- Test: `dg/bypass-finals` is now scoped to this plugin's own `src/` tree in
+  `tests/bootstrap.php` instead of rewriting every class encountered by the test process.
+
 ## 1.0.0 — 2026-09-07
 
 - Feature 001: customer number write protection against the JTL-Connector

@@ -2,7 +2,7 @@
 
 > Plugin: **ShopwareJtlConnectorGuardPlugin** (`revinners/shopware6-jtl-connector-guard`)
 > First feature inside the plugin. The plugin is a container scoped to the JTL-Connector; this spec covers only the customer-number protection. Later connector fixes are added as additional subscribers in the same plugin.
-> Status: **PLANNED — see PLAN.md (implementation in progress on branch feat/001-customer-number-write-protection).**
+> Status: **IMPLEMENTED — released as 1.0.0 (2026-09-07), 1.0.1 pending; see PLAN.md.**
 
 ---
 
