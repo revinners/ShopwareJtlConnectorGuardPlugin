@@ -15,7 +15,9 @@ use Shopware\Core\Framework\Uuid\Uuid;
  * The connector authenticates as an Admin API *integration* (client credentials), so its
  * context source is an AdminApiSource with an integration id and no user id. That id is
  * matched against the configured ids, or its `integration.label` against the configured
- * labels. Anything that is not a positive match is treated as "not the connector".
+ * labels. Labels are matched ignoring case, whitespace and punctuation (so `JTL Connector`
+ * and `JTL-Connector` are the same label). Anything that is not a positive match is treated
+ * as "not the connector".
  */
 final class ConnectorSourceDetector
 {
@@ -49,8 +51,13 @@ final class ConnectorSourceDetector
             return null;
         }
 
-        $wanted = array_map(static fn (string $l): string => mb_strtolower($l), $config->integrationLabels);
-        if (\in_array(mb_strtolower($label), $wanted, true)) {
+        $normalisedLabel = self::normaliseLabel($label);
+        if ($normalisedLabel === '') {
+            return null;
+        }
+
+        $wanted = array_map(static fn (string $l): string => self::normaliseLabel($l), $config->integrationLabels);
+        if (\in_array($normalisedLabel, $wanted, true)) {
             return new ConnectorSource($integrationId, $label);
         }
 
@@ -74,5 +81,15 @@ final class ConnectorSourceDetector
         );
 
         return $this->labels[$integrationId] = \is_string($label) ? $label : null;
+    }
+
+    /**
+     * Lowercases and strips everything but a-z0-9, so labels differing only in case,
+     * whitespace or punctuation (e.g. "JTL Connector" vs "JTL-Connector") compare equal.
+     * A label with no alphanumeric characters normalises to '' and must never match.
+     */
+    private static function normaliseLabel(string $label): string
+    {
+        return preg_replace('/[^a-z0-9]/', '', mb_strtolower($label)) ?? '';
     }
 }

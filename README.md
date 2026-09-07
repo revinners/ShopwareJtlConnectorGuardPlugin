@@ -23,7 +23,8 @@ This plugin makes Shopware the owner of the number:
 
 The connector authenticates as an Admin API **integration** (client credentials), so its writes carry
 an `AdminApiSource` with an integration id and no user id. That integration is matched by **label**
-(default `JTL-Connector`, case-insensitive) and/or by explicit ids from the plugin config. Anything
+(default `JTL-Connector`; matching ignores case, whitespace and punctuation, so the `JTL Connector`
+label used on yam-shop.de matches too) and/or by explicit ids from the plugin config. Anything
 else — admin users, storefront, CLI, imports, other integrations — is never touched.
 
 ### Configuration (Settings → Extensions → JTL-Connector Guard, per sales channel capable)

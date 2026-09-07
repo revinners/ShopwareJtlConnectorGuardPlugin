@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSourceDetector;
@@ -87,6 +88,38 @@ final class ConnectorSourceDetectorTest extends TestCase
 
         self::assertNotNull($source);
         self::assertSame('jtl-connector', $source->label);
+    }
+
+    #[DataProvider('provideEquivalentLabels')]
+    public function testMatchesLabelIgnoringWhitespaceAndPunctuation(string $dbLabel): void
+    {
+        $this->connection->method('fetchOne')->willReturn($dbLabel);
+        $context = Context::createDefaultContext(new AdminApiSource(null, self::INTEGRATION_ID));
+
+        $source = $this->detector->resolve($context, $this->config(labels: ['JTL-Connector']));
+
+        self::assertNotNull($source);
+        self::assertSame($dbLabel, $source->label);
+    }
+
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideEquivalentLabels(): iterable
+    {
+        yield 'space instead of hyphen' => ['JTL Connector'];
+        yield 'underscore, lowercase' => ['jtl_connector'];
+        yield 'extra spaces and dashes' => ['  JTL - connector '];
+    }
+
+    public function testEmptyLabelsNeverMatch(): void
+    {
+        $this->connection->method('fetchOne')->willReturn('---');
+        $context = Context::createDefaultContext(new AdminApiSource(null, self::INTEGRATION_ID));
+
+        $source = $this->detector->resolve($context, $this->config(labels: ['---']));
+
+        self::assertNull($source);
     }
 
     public function testUnknownIntegrationIsNotTheConnector(): void

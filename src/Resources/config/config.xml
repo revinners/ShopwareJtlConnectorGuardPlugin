@@ -48,9 +48,9 @@
             <label>Connector integration label(s)</label>
             <label lang="de-DE">Integrations-Bezeichnung(en) des Connectors</label>
             <label lang="pl-PL">Nazwa/nazwy integracji connectora</label>
-            <helpText>Comma-separated labels of the Admin API integrations (Settings > System > Integrations) used by the JTL-Connector. Matched case-insensitively. Writes from any other integration, admin user or the storefront are never touched.</helpText>
-            <helpText lang="de-DE">Kommagetrennte Bezeichnungen der Admin-API-Integrationen (Einstellungen > System > Integrationen), die der JTL-Connector verwendet. Groß-/Kleinschreibung egal. Schreibvorgänge anderer Integrationen, Admin-Benutzer oder der Storefront werden nie angefasst.</helpText>
-            <helpText lang="pl-PL">Nazwy (po przecinku) integracji Admin API (Ustawienia > System > Integracje) używanych przez JTL-Connector. Wielkość liter bez znaczenia. Zapisy innych integracji, użytkowników admina i storefrontu nigdy nie są modyfikowane.</helpText>
+            <helpText>Comma-separated labels of the Admin API integrations (Settings > System > Integrations) used by the JTL-Connector. Matched ignoring case, whitespace and punctuation (so "JTL Connector" and "JTL-Connector" are the same). Writes from any other integration, admin user or the storefront are never touched.</helpText>
+            <helpText lang="de-DE">Kommagetrennte Bezeichnungen der Admin-API-Integrationen (Einstellungen > System > Integrationen), die der JTL-Connector verwendet. Vergleich ignoriert Groß-/Kleinschreibung, Leerzeichen und Satzzeichen ("JTL Connector" und "JTL-Connector" sind gleich). Schreibvorgänge anderer Integrationen, Admin-Benutzer oder der Storefront werden nie angefasst.</helpText>
+            <helpText lang="pl-PL">Nazwy (po przecinku) integracji Admin API (Ustawienia > System > Integracje) używanych przez JTL-Connector. Porównanie ignoruje wielkość liter, spacje i znaki interpunkcyjne ("JTL Connector" i "JTL-Connector" to to samo). Zapisy innych integracji, użytkowników admina i storefrontu nigdy nie są modyfikowane.</helpText>
             <placeholder>JTL-Connector</placeholder>
             <defaultValue>JTL-Connector</defaultValue>
         </input-field>
