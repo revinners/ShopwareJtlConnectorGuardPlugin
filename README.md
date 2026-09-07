@@ -21,7 +21,8 @@ This plugin makes Shopware the owner of the number:
   Those two are the reliable sinks. Shopware's prod Monolog config runs the `main` handler as
   `fingers_crossed` with `action_level: error`, so an `info` line only reaches `prod.log` if an
   *error* also happens in the same request — the guard's routine `blocked_update` /
-  `remapped_create` lines will not show up there. Only the guard's own `error` lines (an
+  `remapped_create` lines (and, from feature 002, `blocked_identity` / `observed_identity`) will
+  not show up there. Only the guard's own `error` lines (an
   internal failure, or a logging sink that itself failed — see *Implementation notes*) are
   expected to land in the main log; treat `jtl_connector_guard_<env>.log` and the DB table as
   the sources of truth for auditing.
@@ -106,10 +107,16 @@ yam-shop.de). Feature 002 extends the guard, with its own switches, independent 
 | `identityGuardMode` | `log_only` | `log_only` = observe; `enforce` = keep the current email / name |
 | `identityGuardProtectName` | `on_email_swap` | `on_email_swap` / `always` / `off` (see above) |
 
+**Caveat:** if `email` is also listed in the 001 `protectedFields`, the 001 guard (and its mode) owns
+the email; the identity guard then only handles the name (per `identityGuardProtectName`) — do not
+list `email` there unless that overlap is intended.
+
 Rollout mirrors feature 001: deploy in `log_only`, watch `revinners_jtl_guard_log` for
 `observed_identity` rows (`SELECT field, current_value, attempted_value, email FROM revinners_jtl_guard_log WHERE action LIKE '%identity' ORDER BY created_at DESC`),
-then switch `identityGuardMode` to `enforce`. Repairing already-swapped accounts is a separate data
-job (spec 002, "Out of scope").
+then switch `identityGuardMode` to `enforce`. As with feature 001, in `log_only` the identity
+damage keeps happening — the connector still overwrites email/name while you observe — so keep
+this window short; leaving `log_only` on longer does not protect any customer's identity.
+Repairing already-swapped accounts is a separate data job (spec 002, "Out of scope").
 
 ## Development
 

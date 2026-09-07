@@ -18,6 +18,15 @@
   recorded under `off`. Writes from a second Admin API integration and from an admin user changed e-mail and
   name and produced no audit row (only the "not identified as the connector" debug line). The 001 number
   guard still blocked a `customer_number` update in the same build.
+- Fix (final review): when `email` is also listed in the 001 `protectedFields`, the email swap the write
+  represents was silently lost for policy purposes as soon as 001 owned the field — under `on_email_swap`
+  a name swapped in the same write was merely observed instead of reverted. The swap signal is now computed
+  independently of which fields 001 already handled and always drives the name policy; 001 still owns
+  applying/reverting and logging the email itself, so a field is never double-handled.
+- Docs: README now states that `blocked_identity` / `observed_identity` are also routine lines that will
+  not reach `prod.log` under the `fingers_crossed` main handler, spells out the `log_only` rollout warning
+  for feature 002 (the identity damage keeps happening while you observe), and adds a caveat that listing
+  `email` in the 001 `protectedFields` hands ownership of the email to the 001 guard.
 
 ## 1.0.1 — 2026-09-07
 
