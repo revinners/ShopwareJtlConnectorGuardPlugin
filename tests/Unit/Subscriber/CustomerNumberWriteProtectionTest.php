@@ -15,6 +15,7 @@ use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogEntry;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\IdentityGuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Subscriber\CustomerNumberWriteProtection;
 use Shopware\Core\Framework\Api\Context\AdminApiSource;
 use Shopware\Core\Framework\Context;
@@ -78,9 +79,14 @@ final class CustomerNumberWriteProtectionTest extends TestCase
 
     // ---- helpers -----------------------------------------------------------
 
-    private function config(bool $enforce, bool $enabled = true, array $protected = ['customer_number']): GuardConfig
+    private function config(bool $enforce, bool $enabled = true, array $protected = ['customer_number'], ?IdentityGuardConfig $identity = null): GuardConfig
     {
-        return new GuardConfig($enabled, $enforce, ['JTL-Connector'], [], $protected);
+        return new GuardConfig($enabled, $enforce, ['JTL-Connector'], [], $protected, $identity ?? IdentityGuardConfig::disabled());
+    }
+
+    private function identity(bool $enforce, string $protectName = IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP, bool $enabled = true): IdentityGuardConfig
+    {
+        return new IdentityGuardConfig($enabled, $enforce, $protectName);
     }
 
     private function connectorDetected(): void
@@ -485,5 +491,237 @@ final class CustomerNumberWriteProtectionTest extends TestCase
         self::assertSame('Schröder-Wagner', $logged['last_name']->attemptedValue, 'a 16-byte plain string is logged verbatim, not mistaken for a binary id');
         self::assertSame(Uuid::fromBytesToHex($currentGroup), $logged['customer_group_id']->currentValue);
         self::assertSame(Uuid::fromBytesToHex($attemptedGroup), $logged['customer_group_id']->attemptedValue, 'an *_id column is still rendered as hex');
+    }
+
+    // ---- feature 002: identity guard ---------------------------------------
+
+    public function testIdentityGuardDisabledLeavesAnEmailSwapUntouched(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $this->guardLogger->expects(self::never())->method('log');
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('info@motorradgarage-dachau.de', $cmd->getPayload()['email']);
+    }
+
+    public function testEnforceKeepsTheEmailAndAppliesTheRestOfTheWrite(): void
+    {
+        $id = Uuid::randomHex();
+        $group = Uuid::randomBytes();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false, identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field, $e->currentValue, $e->attemptedValue, $e->mode];
+        });
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de', 'customer_group_id' => $group]);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('erdoesi@example.com', $cmd->getPayload()['email'], 'email reverted to the current value');
+        self::assertSame($group, $cmd->getPayload()['customer_group_id'], 'other fields untouched');
+        self::assertSame([[GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'email', 'erdoesi@example.com', 'info@motorradgarage-dachau.de', 'enforce']], $logged);
+    }
+
+    public function testLogOnlyObservesTheEmailSwapButAppliesIt(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, identity: $this->identity(enforce: false)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field, $e->mode];
+        });
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('info@motorradgarage-dachau.de', $cmd->getPayload()['email']);
+        self::assertSame([[GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'email', 'log_only']], $logged);
+    }
+
+    public function testSameEmailInDifferentCaseOrWhitespaceIsNotASwap(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $this->guardLogger->expects(self::never())->method('log');
+
+        $cmd = $this->update($id, ['email' => '  Erdoesi@Example.COM ']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('  Erdoesi@Example.COM ', $cmd->getPayload()['email'], 'not our business; left as sent');
+    }
+
+    public function testEmailAndNameSwapInOneWriteKeepsAllThreeInEnforce(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field];
+        });
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de', 'first_name' => 'Christopher', 'last_name' => 'Kühnel']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('erdoesi@example.com', $cmd->getPayload()['email']);
+        self::assertSame('Adam', $cmd->getPayload()['first_name']);
+        self::assertSame('Erdösi', $cmd->getPayload()['last_name']);
+        self::assertSame([
+            [GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'email'],
+            [GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'first_name'],
+            [GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'last_name'],
+        ], $logged);
+    }
+
+    public function testNameOnlyChangeIsObservedAndAppliedWithOnEmailSwapPolicy(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field, $e->mode];
+        });
+
+        $cmd = $this->update($id, ['last_name' => 'Erdösi-Wagner', 'email' => 'erdoesi@example.com']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('Erdösi-Wagner', $cmd->getPayload()['last_name'], 'ambiguous name-only change is applied');
+        self::assertSame([[GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'last_name', 'enforce']], $logged, 'but observed, with the guard mode recorded');
+    }
+
+    public function testNameOnlyChangeIsKeptWithAlwaysPolicy(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, identity: $this->identity(enforce: true, protectName: IdentityGuardConfig::PROTECT_NAME_ALWAYS)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field];
+        });
+
+        $cmd = $this->update($id, ['first_name' => 'Christopher']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('Adam', $cmd->getPayload()['first_name']);
+        self::assertSame([[GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'first_name']], $logged);
+    }
+
+    public function testNameChangeIsIgnoredWithOffPolicy(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, identity: $this->identity(enforce: true, protectName: IdentityGuardConfig::PROTECT_NAME_OFF)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field];
+        });
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de', 'last_name' => 'Kühnel']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('erdoesi@example.com', $cmd->getPayload()['email'], 'email still guarded');
+        self::assertSame('Kühnel', $cmd->getPayload()['last_name'], 'name neither guarded nor logged');
+        self::assertSame([[GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'email']], $logged);
+    }
+
+    public function testIdentityGuardRunsEvenWhenTheNumberGuardIsDisabled(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, enabled: false, identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field];
+        });
+
+        $cmd = $this->update($id, ['customer_number' => '10009', 'email' => 'info@motorradgarage-dachau.de']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('10009', $cmd->getPayload()['customer_number'], 'number guard off: number change applied and not logged');
+        self::assertSame('erdoesi@example.com', $cmd->getPayload()['email'], 'identity guard on: email kept');
+        self::assertSame([[GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'email']], $logged);
+    }
+
+    public function testEmailInTheNumberGuardBlockListIsHandledOnceNotTwice(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, protected: ['customer_number', 'email'], identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field];
+        });
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('erdoesi@example.com', $cmd->getPayload()['email']);
+        self::assertSame([[GuardLogEntry::ACTION_BLOCKED_UPDATE, 'email']], $logged, 'the 001 block list wins; no second identity entry');
+    }
+
+    public function testIndependentModesNumberLogOnlyIdentityEnforce(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false, identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field, $e->mode];
+        });
+
+        $cmd = $this->update($id, ['customer_number' => '10009', 'email' => 'info@motorradgarage-dachau.de']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('10009', $cmd->getPayload()['customer_number'], 'number guard log_only: applied');
+        self::assertSame('erdoesi@example.com', $cmd->getPayload()['email'], 'identity guard enforce: kept');
+        self::assertSame([
+            [GuardLogEntry::ACTION_BLOCKED_UPDATE, 'customer_number', 'log_only'],
+            [GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'email', 'enforce'],
+        ], $logged);
+    }
+
+    public function testIdentityGuardIgnoresInserts(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false, enabled: false, identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->numberRange->expects(self::never())->method('getValue');
+        $this->guardLogger->expects(self::never())->method('log');
+
+        $cmd = $this->insert($id, ['customer_number' => '51520', 'email' => 'new@example.com']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('new@example.com', $cmd->getPayload()['email']);
+    }
+
+    public function testBothGuardsDisabledSkipDetectionEntirely(): void
+    {
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, enabled: false, identity: $this->identity(enforce: true, enabled: false)));
+        $this->detector->expects(self::never())->method('resolve');
+        $this->guardLogger->expects(self::never())->method('log');
+
+        $cmd = $this->update(Uuid::randomHex(), ['email' => 'x@example.com']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('x@example.com', $cmd->getPayload()['email']);
     }
 }

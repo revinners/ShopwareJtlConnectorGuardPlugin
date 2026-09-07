@@ -13,6 +13,7 @@ use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogEntry;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\IdentityGuardConfig;
 use Shopware\Core\Checkout\Customer\CustomerDefinition;
 use Shopware\Core\Framework\Api\Context\AdminApiSource;
 use Shopware\Core\Framework\Context;
@@ -24,7 +25,8 @@ use Shopware\Core\System\NumberRange\ValueGenerator\NumberRangeValueGeneratorInt
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Makes Shopware the owner of `customer.customer_number` against the JTL-Connector.
+ * Makes Shopware the owner of a customer's number (feature 001) and identity — email and name
+ * (feature 002) — against the JTL-Connector.
  *
  * Runs on EntityWriteEvent, which the DBAL EntityWriteGateway dispatches with the exact
  * WriteCommand instances it executes afterwards. For connector writes only:
@@ -33,12 +35,19 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *    field of the same write is left alone;
  *  - InsertCommand: the supplied customer_number is replaced by a value reserved from the
  *    shop's own `customer` number range for the customer's sales channel.
+ *  - UpdateCommand, identity guard: an email swap (case-insensitive, trimmed inequality) and,
+ *    per policy, a name change are reverted the same way; unprotected name-only changes are
+ *    logged as observed and applied.
  * In log_only mode nothing is changed, only logged. Any internal failure is caught: the
  * write must never be blocked by the guard itself.
  */
 final class CustomerNumberWriteProtection implements EventSubscriberInterface
 {
     private const FIELD_CUSTOMER_NUMBER = GuardConfigProvider::FIELD_CUSTOMER_NUMBER;
+
+    private const FIELD_EMAIL = 'email';
+
+    private const NAME_FIELDS = ['first_name', 'last_name'];
 
     public function __construct(
         private readonly GuardConfigProvider $configProvider,
@@ -108,7 +117,7 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         }
 
         $globalConfig = $this->configProvider->load(null);
-        if (!$globalConfig->enabled) {
+        if (!$globalConfig->enabled && !$globalConfig->identity->enabled) {
             return;
         }
 
@@ -176,15 +185,33 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         }
 
         $config = $this->configProvider->load($state->getSalesChannelId());
-        if (!$config->enabled) {
-            return;
+
+        // Fields the 001 block list already handled (whether or not they changed) are not
+        // re-examined by the identity guard, so a field is never logged twice.
+        $handled = [];
+        if ($config->enabled) {
+            $handled = $this->guardProtectedFields($command, $idHex, $state, $config, $connector);
         }
 
+        if ($config->identity->enabled) {
+            $this->guardIdentity($command, $idHex, $state, $config, $connector, $handled);
+        }
+    }
+
+    /**
+     * Feature 001: the configurable block list (always containing customer_number).
+     *
+     * @return list<string> the protected fields present in this write
+     */
+    private function guardProtectedFields(UpdateCommand $command, string $idHex, CustomerState $state, GuardConfig $config, ConnectorSource $connector): array
+    {
         $payload = $command->getPayload();
+        $present = [];
         foreach ($config->protectedFields as $field) {
             if (!$command->hasField($field)) {
                 continue;
             }
+            $present[] = $field;
 
             $attempted = $payload[$field];
             $current = $state->get($field);
@@ -196,22 +223,106 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
                 $command->addPayload($field, $current);
             }
 
-            $this->guardLogger->log(new GuardLogEntry(
-                action: GuardLogEntry::ACTION_BLOCKED_UPDATE,
-                mode: $config->mode(),
-                field: $field,
-                customerId: $idHex,
-                email: $state->getEmail(),
-                firstName: $state->getFirstName(),
-                lastName: $state->getLastName(),
-                currentValue: $this->renderValue($field, $current),
-                attemptedValue: $this->renderValue($field, $attempted),
-                assignedValue: null,
-                integrationId: $connector->integrationId,
-                integrationLabel: $connector->label,
-                salesChannelId: $state->getSalesChannelId(),
+            $this->guardLogger->log($this->entry(
+                GuardLogEntry::ACTION_BLOCKED_UPDATE,
+                $config->mode(),
+                $field,
+                $idHex,
+                $state,
+                $connector,
+                $this->renderValue($field, $current),
+                $this->renderValue($field, $attempted),
             ));
         }
+
+        return $present;
+    }
+
+    /**
+     * Feature 002: email is the hard identity key; a name change is guarded only per policy.
+     *
+     * @param list<string> $handled fields already processed by the 001 block list
+     */
+    private function guardIdentity(UpdateCommand $command, string $idHex, CustomerState $state, GuardConfig $config, ConnectorSource $connector, array $handled): void
+    {
+        $identity = $config->identity;
+        $payload = $command->getPayload();
+
+        $emailSwapped = $command->hasField(self::FIELD_EMAIL)
+            && !\in_array(self::FIELD_EMAIL, $handled, true)
+            && !$this->sameEmail($payload[self::FIELD_EMAIL], $state->getEmail());
+
+        $changedNames = [];
+        foreach (self::NAME_FIELDS as $field) {
+            if ($command->hasField($field) && !\in_array($field, $handled, true) && !$this->same($payload[$field], $state->get($field))) {
+                $changedNames[] = $field;
+            }
+        }
+
+        if ($emailSwapped) {
+            $this->guardIdentityField($command, self::FIELD_EMAIL, true, $idHex, $state, $identity, $connector);
+        }
+
+        if ($identity->protectName === IdentityGuardConfig::PROTECT_NAME_OFF) {
+            return;
+        }
+        $protectNames = $identity->protectName === IdentityGuardConfig::PROTECT_NAME_ALWAYS || $emailSwapped;
+        foreach ($changedNames as $field) {
+            $this->guardIdentityField($command, $field, $protectNames, $idHex, $state, $identity, $connector);
+        }
+    }
+
+    private function guardIdentityField(UpdateCommand $command, string $field, bool $protect, string $idHex, CustomerState $state, IdentityGuardConfig $identity, ConnectorSource $connector): void
+    {
+        $attempted = $command->getPayload()[$field];
+        $current = $state->get($field);
+
+        $kept = $protect && $identity->enforce;
+        if ($kept) {
+            $command->addPayload($field, $current);
+        }
+
+        $this->guardLogger->log($this->entry(
+            $kept ? GuardLogEntry::ACTION_BLOCKED_IDENTITY : GuardLogEntry::ACTION_OBSERVED_IDENTITY,
+            $identity->mode(),
+            $field,
+            $idHex,
+            $state,
+            $connector,
+            $this->renderValue($field, $current),
+            $this->renderValue($field, $attempted),
+        ));
+    }
+
+    private function entry(string $action, string $mode, string $field, string $idHex, CustomerState $state, ConnectorSource $connector, ?string $current, ?string $attempted): GuardLogEntry
+    {
+        return new GuardLogEntry(
+            action: $action,
+            mode: $mode,
+            field: $field,
+            customerId: $idHex,
+            email: $state->getEmail(),
+            firstName: $state->getFirstName(),
+            lastName: $state->getLastName(),
+            currentValue: $current,
+            attemptedValue: $attempted,
+            assignedValue: null,
+            integrationId: $connector->integrationId,
+            integrationLabel: $connector->label,
+            salesChannelId: $state->getSalesChannelId(),
+        );
+    }
+
+    /**
+     * Email identity comparison: case-insensitive and trimmed (spec 002, technical notes).
+     */
+    private function sameEmail(mixed $a, mixed $b): bool
+    {
+        if ($a === null || $b === null) {
+            return $a === $b;
+        }
+
+        return mb_strtolower(trim((string) $a)) === mb_strtolower(trim((string) $b));
     }
 
     /**
