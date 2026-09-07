@@ -77,4 +77,77 @@
             <defaultValue>customer_number</defaultValue>
         </input-field>
     </card>
+
+    <card>
+        <title>JTL-Connector Guard — customer identity protection</title>
+        <title lang="de-DE">JTL-Connector Guard — Kundenidentitäts-Schutz</title>
+        <title lang="pl-PL">JTL-Connector Guard — ochrona tożsamości klienta</title>
+
+        <input-field type="bool">
+            <name>identityGuardEnabled</name>
+            <label>Identity guard enabled</label>
+            <label lang="de-DE">Identitätsschutz aktiv</label>
+            <label lang="pl-PL">Ochrona tożsamości włączona</label>
+            <helpText>Protects an existing customer's e-mail (and name, see below) from being replaced by the JTL-Connector. Independent of the customer-number guard above.</helpText>
+            <helpText lang="de-DE">Schützt E-Mail (und Name, siehe unten) eines bestehenden Kunden vor dem Überschreiben durch den JTL-Connector. Unabhängig vom Kundennummern-Schutz oben.</helpText>
+            <helpText lang="pl-PL">Chroni e-mail (i nazwisko, patrz niżej) istniejącego klienta przed nadpisaniem przez JTL-Connector. Niezależne od ochrony numeru klienta powyżej.</helpText>
+            <defaultValue>true</defaultValue>
+        </input-field>
+
+        <input-field type="single-select">
+            <name>identityGuardMode</name>
+            <label>Identity guard mode</label>
+            <label lang="de-DE">Modus Identitätsschutz</label>
+            <label lang="pl-PL">Tryb ochrony tożsamości</label>
+            <helpText>"Log only" records every e-mail/name replacement but applies it (use first on production). "Enforce" keeps the current e-mail (and name per the policy below) and applies the rest of the connector's write.</helpText>
+            <helpText lang="de-DE">"Nur protokollieren" zeichnet jeden E-Mail-/Namenstausch auf, wendet ihn aber an (zuerst in Produktion verwenden). "Durchsetzen" behält die aktuelle E-Mail (und den Namen gemäß Regel unten) und wendet den Rest des Connector-Schreibvorgangs an.</helpText>
+            <helpText lang="pl-PL">"Tylko loguj" zapisuje każdą podmianę e-maila/nazwiska, ale ją stosuje (użyj najpierw na produkcji). "Wymuszaj" zachowuje obecny e-mail (i nazwisko wg reguły poniżej), a resztę zapisu connectora stosuje.</helpText>
+            <options>
+                <option>
+                    <id>log_only</id>
+                    <name>Log only</name>
+                    <name lang="de-DE">Nur protokollieren</name>
+                    <name lang="pl-PL">Tylko loguj</name>
+                </option>
+                <option>
+                    <id>enforce</id>
+                    <name>Enforce</name>
+                    <name lang="de-DE">Durchsetzen</name>
+                    <name lang="pl-PL">Wymuszaj</name>
+                </option>
+            </options>
+            <defaultValue>log_only</defaultValue>
+        </input-field>
+
+        <input-field type="single-select">
+            <name>identityGuardProtectName</name>
+            <label>Protect first/last name</label>
+            <label lang="de-DE">Vor-/Nachname schützen</label>
+            <label lang="pl-PL">Chroń imię/nazwisko</label>
+            <helpText>"Only with an e-mail swap" (default): the name is kept only when the same write also replaces the e-mail; a name-only change is logged as observed and applied. "Always": name changes are guarded like the e-mail. "Off": name changes are neither guarded nor logged.</helpText>
+            <helpText lang="de-DE">"Nur bei E-Mail-Tausch" (Standard): der Name wird nur behalten, wenn derselbe Schreibvorgang auch die E-Mail ersetzt; eine reine Namensänderung wird protokolliert und angewendet. "Immer": Namensänderungen werden wie die E-Mail geschützt. "Aus": Namensänderungen werden weder geschützt noch protokolliert.</helpText>
+            <helpText lang="pl-PL">"Tylko przy podmianie e-maila" (domyślnie): nazwisko jest zachowywane tylko, gdy ten sam zapis podmienia też e-mail; sama zmiana nazwiska jest logowana i stosowana. "Zawsze": zmiany nazwiska chronione jak e-mail. "Wyłączone": zmiany nazwiska nie są ani chronione, ani logowane.</helpText>
+            <options>
+                <option>
+                    <id>on_email_swap</id>
+                    <name>Only together with an e-mail swap</name>
+                    <name lang="de-DE">Nur zusammen mit E-Mail-Tausch</name>
+                    <name lang="pl-PL">Tylko razem z podmianą e-maila</name>
+                </option>
+                <option>
+                    <id>always</id>
+                    <name>Always</name>
+                    <name lang="de-DE">Immer</name>
+                    <name lang="pl-PL">Zawsze</name>
+                </option>
+                <option>
+                    <id>off</id>
+                    <name>Off</name>
+                    <name lang="de-DE">Aus</name>
+                    <name lang="pl-PL">Wyłączone</name>
+                </option>
+            </options>
+            <defaultValue>on_email_swap</defaultValue>
+        </input-field>
+    </card>
 </config>

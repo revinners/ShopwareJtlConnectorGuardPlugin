@@ -7,7 +7,7 @@ namespace Revinners\ShopwareJtlConnectorGuardPlugin\Service;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 
 /**
- * Reads the plugin config (config.xml) into a GuardConfig, per sales channel, memoised per request.
+ * Reads the plugin config (config.xml, both cards) into a GuardConfig, per sales channel, memoised per request.
  */
 final class GuardConfigProvider
 {
@@ -18,6 +18,12 @@ final class GuardConfigProvider
     public const MODE_ENFORCE = 'enforce';
 
     public const FIELD_CUSTOMER_NUMBER = 'customer_number';
+
+    public const KEY_IDENTITY_ENABLED = 'identityGuardEnabled';
+
+    public const KEY_IDENTITY_MODE = 'identityGuardMode';
+
+    public const KEY_IDENTITY_PROTECT_NAME = 'identityGuardProtectName';
 
     private const DEFAULT_INTEGRATION_LABEL = 'JTL-Connector';
 
@@ -56,12 +62,26 @@ final class GuardConfigProvider
             $this->splitList($this->get('protectedFields', $salesChannelId)),
         )));
 
+        $identityEnabled = $this->get(self::KEY_IDENTITY_ENABLED, $salesChannelId);
+        $identityMode = (string) ($this->get(self::KEY_IDENTITY_MODE, $salesChannelId) ?? self::MODE_LOG_ONLY);
+        $protectName = (string) ($this->get(self::KEY_IDENTITY_PROTECT_NAME, $salesChannelId) ?? IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP);
+        if (!\in_array($protectName, IdentityGuardConfig::PROTECT_NAME_VALUES, true)) {
+            $protectName = IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP;
+        }
+
+        $identity = new IdentityGuardConfig(
+            enabled: $identityEnabled === null ? true : (bool) $identityEnabled,
+            enforce: $identityMode === self::MODE_ENFORCE,
+            protectName: $protectName,
+        );
+
         return $this->memo[$memoKey] = new GuardConfig(
             enabled: $enabled === null ? true : (bool) $enabled,
             enforce: $mode === self::MODE_ENFORCE,
             integrationLabels: $labels,
             integrationIds: $ids,
             protectedFields: $fields,
+            identity: $identity,
         );
     }
 

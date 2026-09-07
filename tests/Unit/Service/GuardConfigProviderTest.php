@@ -7,6 +7,7 @@ namespace Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Service;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\IdentityGuardConfig;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 
 final class GuardConfigProviderTest extends TestCase
@@ -82,7 +83,7 @@ final class GuardConfigProviderTest extends TestCase
 
     public function testLoadIsMemoisedPerSalesChannel(): void
     {
-        $this->systemConfig->expects(self::exactly(10))->method('get')->willReturn(null); // 5 keys x 2 channels
+        $this->systemConfig->expects(self::exactly(16))->method('get')->willReturn(null); // 8 keys x 2 channels
 
         $provider = new GuardConfigProvider($this->systemConfig);
         $provider->load(null);
@@ -93,11 +94,51 @@ final class GuardConfigProviderTest extends TestCase
 
     public function testResetClearsTheMemo(): void
     {
-        $this->systemConfig->expects(self::exactly(10))->method('get')->willReturn(null);
+        $this->systemConfig->expects(self::exactly(16))->method('get')->willReturn(null); // 8 keys x 2 channels
 
         $provider = new GuardConfigProvider($this->systemConfig);
         $provider->load(null);
         $provider->reset();
         $provider->load(null);
+    }
+
+    public function testIdentityGuardDefaultsWhenNothingIsConfigured(): void
+    {
+        $identity = $this->providerWith([])->load()->identity;
+
+        self::assertTrue($identity->enabled);
+        self::assertFalse($identity->enforce, 'identity guard ships in log_only');
+        self::assertSame(IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP, $identity->protectName);
+    }
+
+    public function testIdentityGuardParsesConfiguredValues(): void
+    {
+        $identity = $this->providerWith([
+            'identityGuardEnabled' => false,
+            'identityGuardMode' => 'enforce',
+            'identityGuardProtectName' => 'always',
+        ])->load('sc-1')->identity;
+
+        self::assertFalse($identity->enabled);
+        self::assertTrue($identity->enforce);
+        self::assertSame(IdentityGuardConfig::PROTECT_NAME_ALWAYS, $identity->protectName);
+    }
+
+    public function testIdentityGuardIsIndependentOfTheNumberGuard(): void
+    {
+        $config = $this->providerWith(['enabled' => false, 'mode' => 'log_only', 'identityGuardMode' => 'enforce'])->load();
+
+        self::assertFalse($config->enabled);
+        self::assertFalse($config->enforce);
+        self::assertTrue($config->identity->enabled);
+        self::assertTrue($config->identity->enforce);
+    }
+
+    public function testUnknownIdentityValuesFallBackToDefaults(): void
+    {
+        $identity = $this->providerWith(['identityGuardMode' => 'yolo', 'identityGuardProtectName' => 'sometimes'])->load()->identity;
+
+        self::assertFalse($identity->enforce);
+        self::assertSame(IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP, $identity->protectName);
     }
 }
