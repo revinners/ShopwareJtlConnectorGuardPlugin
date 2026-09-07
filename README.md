@@ -2,6 +2,7 @@
 
 `revinners/shopware6-jtl-connector-guard` — a container plugin for every fix we apply on top of the
 JTL-Connector (JTL-Wawi → Shopware). Shops: **yam-shop.de**, **ducati-world24.com** (Shopware 6.6.10.x).
+Features: **001** customer number write protection (1.0.x), **002** customer identity write protection (1.1.0).
 
 ## Feature 001 — customer number write protection
 
@@ -81,6 +82,34 @@ else — admin users, storefront, CLI, imports, other integrations — is never 
   line the guard emits falls back to Shopware's main `logger` service if the `jtl_connector_guard`
   channel itself cannot be written (e.g. its log file cannot be opened). No failure of either
   logger can propagate out of `onEntityWrite()` and into the DAL write.
+
+## Feature 002 — customer identity write protection
+
+The same connector push also replaces a customer's **identity**: `email` and `first_name`/`last_name`
+are overwritten with a different person's data while the address entity stays untouched (see
+`specs/feat/002-customer-identity-write-protection/SPEC.md` for the evidence; 38 confirmed cases on
+yam-shop.de). Feature 002 extends the guard, with its own switches, independent of the number guard:
+
+- **Email** (the hard identity key): a connector update that would change an existing customer's
+  email to a *different* address (case-insensitive, trimmed) is kept in `enforce`, observed in `log_only`.
+- **Name**: per `identityGuardProtectName` — `on_email_swap` (default) keeps the name only when the
+  same write also swaps the email and otherwise logs the name change as observed and applies it;
+  `always` guards the name like the email; `off` ignores name changes entirely.
+- Everything else in the write (group, addresses, …) is applied. Connector-created customers are
+  not affected. Admin, storefront, CLI and other-integration writes are never touched.
+- Audit actions: `blocked_identity` (value kept) and `observed_identity` (value applied — either
+  `log_only`, or an unprotected name-only change); `field` is `email`, `first_name` or `last_name`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `identityGuardEnabled` | `true` | master switch of feature 002 |
+| `identityGuardMode` | `log_only` | `log_only` = observe; `enforce` = keep the current email / name |
+| `identityGuardProtectName` | `on_email_swap` | `on_email_swap` / `always` / `off` (see above) |
+
+Rollout mirrors feature 001: deploy in `log_only`, watch `revinners_jtl_guard_log` for
+`observed_identity` rows (`SELECT field, current_value, attempted_value, email FROM revinners_jtl_guard_log WHERE action LIKE '%identity' ORDER BY created_at DESC`),
+then switch `identityGuardMode` to `enforce`. Repairing already-swapped accounts is a separate data
+job (spec 002, "Out of scope").
 
 ## Development
 

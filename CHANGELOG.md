@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-09-07
+
+- Feature 002: customer identity write protection — a connector update can no longer replace an
+  existing customer's `email` (and `first_name`/`last_name` when paired with the email swap, or
+  always/never per `identityGuardProtectName`). Own switches `identityGuardEnabled` /
+  `identityGuardMode` (ships `log_only`), independent of the number guard.
+- New audit actions `blocked_identity` and `observed_identity` on the same table and channel.
+- No migration.
+
 ## 1.0.1 — 2026-09-07
 
 - Fix: error paths no longer depend on the channel logger. `GuardLogger` and

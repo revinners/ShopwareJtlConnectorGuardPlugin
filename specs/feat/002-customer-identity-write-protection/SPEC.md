@@ -2,7 +2,7 @@
 
 > Plugin: **ShopwareJtlConnectorGuardPlugin** (`revinners/shopware6-jtl-connector-guard`)
 > Second feature in the plugin. Builds directly on **001 - Customer Number Write Protection** (implemented, released 1.0.0/1.0.1). Reuses 001's connector-detection, mode switch (`log_only`/`enforce`), and audit log.
-> Status: **SPEC ONLY — no implementation plan yet (PLAN.md intentionally empty). Do not implement before 001 is deployed and observed on prod.**
+> Status: **IMPLEMENTED — see PLAN.md; released as 1.1.0 (2026-09-07). Implemented before 001 was observed on prod at the user's request; ships log_only.**
 
 ---
 
