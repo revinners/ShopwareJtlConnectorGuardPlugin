@@ -677,6 +677,84 @@ final class CustomerNumberWriteProtectionTest extends TestCase
         self::assertSame([[GuardLogEntry::ACTION_BLOCKED_UPDATE, 'email']], $logged, 'the 001 block list wins; no second identity entry');
     }
 
+    /**
+     * F1 regression: when `email` is also listed in the 001 block list, the number guard alone
+     * decides whether the email itself is applied/reverted and logged (once), but the swap it
+     * represents must still drive the name policy under `on_email_swap` — it must not be
+     * silently treated as "no swap" just because 001 already owns the field.
+     */
+    public function testEmailInTheNumberGuardBlockListStillDrivesTheNamePolicy(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false, protected: ['customer_number', 'email'], identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field, $e->mode];
+        });
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de', 'last_name' => 'Kühnel']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('info@motorradgarage-dachau.de', $cmd->getPayload()['email'], '001 owns email, log_only: applied');
+        self::assertSame('Erdösi', $cmd->getPayload()['last_name'], 'name reverted: the email swap still drives the policy');
+        self::assertSame([
+            [GuardLogEntry::ACTION_BLOCKED_UPDATE, 'email', 'log_only'],
+            [GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'last_name', 'enforce'],
+        ], $logged, 'exactly one entry per field, no double log for email');
+    }
+
+    /**
+     * F2: identity `enforce: false` (log_only) with `protectName: always` still observes and
+     * logs a name-only change, but never blocks it.
+     */
+    public function testAlwaysPolicyInLogOnlyObservesTheNameButAppliesIt(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, identity: $this->identity(enforce: false, protectName: IdentityGuardConfig::PROTECT_NAME_ALWAYS)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field, $e->mode];
+        });
+
+        $cmd = $this->update($id, ['first_name' => 'Christopher']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('Christopher', $cmd->getPayload()['first_name'], 'log_only: applied');
+        self::assertSame([[GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'first_name', 'log_only']], $logged);
+    }
+
+    /**
+     * F2: default `on_email_swap` policy in `log_only` observes email, first_name and last_name
+     * together (email swap plus both names changed in the same write) but applies all three.
+     */
+    public function testOnEmailSwapPolicyInLogOnlyObservesAllThree(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, identity: $this->identity(enforce: false)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field, $e->mode];
+        });
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de', 'first_name' => 'Christopher', 'last_name' => 'Kühnel']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('info@motorradgarage-dachau.de', $cmd->getPayload()['email']);
+        self::assertSame('Christopher', $cmd->getPayload()['first_name']);
+        self::assertSame('Kühnel', $cmd->getPayload()['last_name']);
+        self::assertSame([
+            [GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'email', 'log_only'],
+            [GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'first_name', 'log_only'],
+            [GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'last_name', 'log_only'],
+        ], $logged);
+    }
+
     public function testIndependentModesNumberLogOnlyIdentityEnforce(): void
     {
         $id = Uuid::randomHex();

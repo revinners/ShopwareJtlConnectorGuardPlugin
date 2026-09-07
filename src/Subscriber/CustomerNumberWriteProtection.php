@@ -186,8 +186,9 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
 
         $config = $this->configProvider->load($state->getSalesChannelId());
 
-        // Fields the 001 block list already handled (whether or not they changed) are not
-        // re-examined by the identity guard, so a field is never logged twice.
+        // Fields the 001 block list already handled (whether or not they changed) are never
+        // reverted or logged a second time by the identity guard — but an email 001 already
+        // owns is still read for its swap signal, which drives the name policy regardless.
         $handled = [];
         if ($config->enabled) {
             $handled = $this->guardProtectedFields($command, $idHex, $state, $config, $connector);
@@ -248,8 +249,9 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         $identity = $config->identity;
         $payload = $command->getPayload();
 
+        // Raw signal, independent of $handled: whether 001 already owns the email must never
+        // suppress the fact that this write swaps it — the name policy below needs to see it.
         $emailSwapped = $command->hasField(self::FIELD_EMAIL)
-            && !\in_array(self::FIELD_EMAIL, $handled, true)
             && !$this->sameEmail($payload[self::FIELD_EMAIL], $state->getEmail());
 
         $changedNames = [];
@@ -259,7 +261,9 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
             }
         }
 
-        if ($emailSwapped) {
+        // $handled only gates whether the identity step itself may revert/log the email: when
+        // 001's block list already processed it, this step must not double-revert or double-log.
+        if ($emailSwapped && !\in_array(self::FIELD_EMAIL, $handled, true)) {
             $this->guardIdentityField($command, self::FIELD_EMAIL, true, $idHex, $state, $identity, $connector);
         }
 
