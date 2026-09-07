@@ -44,6 +44,8 @@ final class GuardLoggerTest extends TestCase
             ),
             self::callback(static fn (array $ctx): bool => $ctx['action'] === 'blocked_update' && $ctx['attemptedValue'] === '10009')
         );
+        $fallback = $this->createMock(LoggerInterface::class);
+        $fallback->expects(self::never())->method('error');
 
         $connection = $this->createMock(Connection::class);
         $connection->expects(self::once())->method('insert')->with(
@@ -64,7 +66,7 @@ final class GuardLoggerTest extends TestCase
             })
         );
 
-        (new GuardLogger($logger, $connection))->log($this->entry());
+        (new GuardLogger($logger, $fallback, $connection))->log($this->entry());
     }
 
     public function testDbFailureIsSwallowedAndReported(): void
@@ -72,11 +74,51 @@ final class GuardLoggerTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::once())->method('info');
         $logger->expects(self::once())->method('error')->with(self::stringContains('could not persist'), self::anything());
+        $fallback = $this->createMock(LoggerInterface::class);
+        $fallback->expects(self::never())->method('error');
 
         $connection = $this->createMock(Connection::class);
         $connection->method('insert')->willThrowException(new \RuntimeException('table gone'));
 
-        (new GuardLogger($logger, $connection))->log($this->entry());
+        (new GuardLogger($logger, $fallback, $connection))->log($this->entry());
+    }
+
+    /**
+     * F1 regression: the channel logger's info() call must not be able to prevent the DB
+     * insert, and its own failure must be reported on the fallback logger instead of escaping.
+     */
+    public function testChannelLoggerInfoFailureDoesNotBlockTheDbInsertAndIsReportedOnFallback(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info')->willThrowException(new \RuntimeException('stream could not be opened'));
+        $logger->expects(self::never())->method('error');
+
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('insert');
+
+        $fallback = $this->createMock(LoggerInterface::class);
+        $fallback->expects(self::once())->method('error')->with(self::anything(), self::anything());
+
+        (new GuardLogger($logger, $fallback, $connection))->log($this->entry());
+    }
+
+    /**
+     * F1 regression: when the DB insert fails AND the channel logger's error() call also
+     * throws (same broken sink), the fallback logger must still get the error report.
+     */
+    public function testDbFailureAndChannelLoggerErrorFailureBothReportedOnFallback(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info');
+        $logger->expects(self::once())->method('error')->willThrowException(new \RuntimeException('stream could not be opened'));
+
+        $connection = $this->createMock(Connection::class);
+        $connection->method('insert')->willThrowException(new \RuntimeException('table gone'));
+
+        $fallback = $this->createMock(LoggerInterface::class);
+        $fallback->expects(self::once())->method('error')->with(self::stringContains('could not persist'), self::anything());
+
+        (new GuardLogger($logger, $fallback, $connection))->log($this->entry());
     }
 
     /**
@@ -95,7 +137,7 @@ final class GuardLoggerTest extends TestCase
             self::anything(),
         );
 
-        (new GuardLogger($logger, $this->createMock(Connection::class)))->log($this->entry(mode: 'log_only'));
+        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $this->createMock(Connection::class)))->log($this->entry(mode: 'log_only'));
     }
 
     /**
@@ -113,7 +155,7 @@ final class GuardLoggerTest extends TestCase
             self::anything(),
         );
 
-        (new GuardLogger($logger, $this->createMock(Connection::class)))->log(new GuardLogEntry(
+        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $this->createMock(Connection::class)))->log(new GuardLogEntry(
             action: GuardLogEntry::ACTION_REMAPPED_CREATE,
             mode: 'enforce',
             field: 'customer_number',
@@ -141,7 +183,7 @@ final class GuardLoggerTest extends TestCase
             self::anything(),
         );
 
-        (new GuardLogger($logger, $this->createMock(Connection::class)))->log(new GuardLogEntry(
+        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $this->createMock(Connection::class)))->log(new GuardLogEntry(
             action: GuardLogEntry::ACTION_REMAPPED_CREATE,
             mode: 'log_only',
             field: 'customer_number',

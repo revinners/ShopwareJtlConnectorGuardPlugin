@@ -47,6 +47,7 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         private readonly NumberRangeValueGeneratorInterface $numberRangeGenerator,
         private readonly GuardLogger $guardLogger,
         private readonly LoggerInterface $logger,
+        private readonly LoggerInterface $fallbackLogger,
     ) {
     }
 
@@ -60,10 +61,35 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         try {
             $this->guard($event);
         } catch (\Throwable $e) {
-            $this->logger->error(
+            $this->log(
+                'error',
                 'jtl_connector_guard failed, customer write left untouched: ' . $e->getMessage(),
                 ['exception' => $e]
             );
+        }
+    }
+
+    /**
+     * Routes every diagnostic line through the channel logger first, falling back to
+     * Shopware's main logger if the channel itself is broken. Never throws: a failure of
+     * both loggers must not be able to escape into the DAL write.
+     *
+     * @param array<string, mixed> $context
+     */
+    private function log(string $level, string $message, array $context = []): void
+    {
+        try {
+            $this->logger->{$level}($message, $context);
+
+            return;
+        } catch (\Throwable) {
+            // channel logger is broken, fall through to the fallback below
+        }
+
+        try {
+            $this->fallbackLogger->{$level}($message, $context);
+        } catch (\Throwable) {
+            // both loggers are broken; swallow, never let logging break the customer write.
         }
     }
 
@@ -88,7 +114,8 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
 
         $connector = $this->sourceDetector->resolve($context, $globalConfig);
         if ($connector === null) {
-            $this->logger->debug(
+            $this->log(
+                'debug',
                 'jtl_connector_guard: admin-api integration write to customer not identified as the connector, left untouched',
                 ['integrationId' => strtolower($source->getIntegrationId())]
             );
@@ -133,7 +160,8 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
             try {
                 $this->guardUpdate($command, $idHex, $states[$idHex] ?? null, $connector);
             } catch (\Throwable $e) {
-                $this->logger->error(
+                $this->log(
+                    'error',
                     sprintf('jtl_connector_guard: failed to guard customer %s, left untouched: %s', $idHex, $e->getMessage()),
                     ['exception' => $e, 'customerId' => $idHex]
                 );
@@ -199,7 +227,8 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
             try {
                 $this->guardInsert($command, $connector, $context);
             } catch (\Throwable $e) {
-                $this->logger->error(
+                $this->log(
+                    'error',
                     sprintf('jtl_connector_guard: failed to guard new customer %s, left untouched: %s', $idHex ?? 'unknown', $e->getMessage()),
                     ['exception' => $e, 'customerId' => $idHex]
                 );

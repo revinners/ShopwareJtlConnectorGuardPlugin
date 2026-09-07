@@ -13,19 +13,31 @@ use Shopware\Core\Framework\Uuid\Uuid;
 /**
  * Records every intervention twice: on the `jtl_connector_guard` Monolog channel and in the
  * `revinners_jtl_guard_log` table (plain DBAL insert — no DAL write from inside a write event).
- * Logging must never break the customer write, so DB failures are reported and swallowed.
+ * Logging must never break the customer write: neither sink (the channel logger or the DB
+ * insert) is allowed to throw out of log(). If the channel logger itself is broken (e.g. its
+ * StreamHandler cannot open `var/log/jtl_connector_guard_<env>.log`), we report on the
+ * fallback logger (Shopware's main channel) instead, and if that also fails, we give up
+ * silently — there is nothing left we can safely do without risking the customer write.
  */
 final class GuardLogger
 {
     public function __construct(
         private readonly LoggerInterface $logger,
+        private readonly LoggerInterface $fallbackLogger,
         private readonly Connection $connection,
     ) {
     }
 
     public function log(GuardLogEntry $entry): void
     {
-        $this->logger->info($this->message($entry), $entry->toArray());
+        try {
+            $this->logger->info($this->message($entry), $entry->toArray());
+        } catch (\Throwable $e) {
+            $this->reportOnFallback(
+                'jtl_connector_guard: could not write channel log: ' . $e->getMessage(),
+                ['exception' => $e] + $entry->toArray()
+            );
+        }
 
         try {
             $this->connection->insert(ShopwareJtlConnectorGuardPlugin::LOG_TABLE, [
@@ -46,10 +58,29 @@ final class GuardLogger
                 'created_at' => (new \DateTimeImmutable())->format(Defaults::STORAGE_DATE_TIME_FORMAT),
             ]);
         } catch (\Throwable $e) {
-            $this->logger->error(
-                'jtl_connector_guard: could not persist audit row: ' . $e->getMessage(),
-                ['exception' => $e] + $entry->toArray()
-            );
+            $message = 'jtl_connector_guard: could not persist audit row: ' . $e->getMessage();
+            $context = ['exception' => $e] + $entry->toArray();
+
+            try {
+                $this->logger->error($message, $context);
+            } catch (\Throwable $channelFailure) {
+                $this->reportOnFallback($message, $context + ['channelLoggerException' => $channelFailure]);
+            }
+        }
+    }
+
+    /**
+     * Last-resort report when the channel logger sink itself failed. Never rethrows: if the
+     * fallback logger also fails there is nothing left we can safely do here.
+     *
+     * @param array<string, mixed> $context
+     */
+    private function reportOnFallback(string $message, array $context): void
+    {
+        try {
+            $this->fallbackLogger->error($message, $context);
+        } catch (\Throwable) {
+            // Both sinks are broken. Swallow: logging must never break the customer write.
         }
     }
 

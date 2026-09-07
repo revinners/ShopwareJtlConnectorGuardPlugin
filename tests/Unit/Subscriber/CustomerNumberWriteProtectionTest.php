@@ -42,6 +42,7 @@ final class CustomerNumberWriteProtectionTest extends TestCase
     private NumberRangeValueGeneratorInterface&MockObject $numberRange;
     private GuardLogger&MockObject $guardLogger;
     private LoggerInterface&MockObject $logger;
+    private LoggerInterface&MockObject $fallbackLogger;
     private CustomerNumberWriteProtection $subscriber;
     private Context $connectorContext;
 
@@ -60,6 +61,7 @@ final class CustomerNumberWriteProtectionTest extends TestCase
         $this->numberRange = $this->createMock(NumberRangeValueGeneratorInterface::class);
         $this->guardLogger = $this->createMock(GuardLogger::class);
         $this->logger = $this->createMock(LoggerInterface::class);
+        $this->fallbackLogger = $this->createMock(LoggerInterface::class);
 
         $this->subscriber = new CustomerNumberWriteProtection(
             $this->configProvider,
@@ -68,6 +70,7 @@ final class CustomerNumberWriteProtectionTest extends TestCase
             $this->numberRange,
             $this->guardLogger,
             $this->logger,
+            $this->fallbackLogger,
         );
 
         $this->connectorContext = Context::createDefaultContext(new AdminApiSource(null, self::INTEGRATION_ID));
@@ -356,6 +359,43 @@ final class CustomerNumberWriteProtectionTest extends TestCase
         $this->logger->expects(self::once())->method('debug')->with(self::stringContains('not identified'), ['integrationId' => self::INTEGRATION_ID]);
 
         $this->subscriber->onEntityWrite($this->event([$this->update(Uuid::randomHex(), ['customer_number' => '1'])]));
+    }
+
+    /**
+     * F1 regression: state loader throws AND the channel logger's error() call also throws
+     * (the outer catch in onEntityWrite()). The write must still return normally, the payload
+     * must stay untouched, and the fallback logger must receive the error exactly once.
+     */
+    public function testStateLoaderFailureAndChannelLoggerFailureBothFallBackToTheMainLogger(): void
+    {
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willThrowException(new \RuntimeException('db down'));
+        $this->logger->expects(self::once())->method('error')->willThrowException(new \RuntimeException('stream could not be opened'));
+        $this->fallbackLogger->expects(self::once())->method('error')->with(self::stringContains('left untouched'), self::anything());
+        $this->guardLogger->expects(self::never())->method('log');
+
+        $cmd = $this->update(Uuid::randomHex(), ['customer_number' => '10009']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('10009', $cmd->getPayload()['customer_number'], 'payload untouched, both loggers failing must not corrupt the write');
+    }
+
+    /**
+     * F1 regression: the "not identified as the connector" debug line must not be able to
+     * throw into the write, even when the channel logger itself throws on debug().
+     */
+    public function testUnidentifiedIntegrationWriteWithThrowingChannelLoggerReturnsNormally(): void
+    {
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->detector->method('resolve')->willReturn(null);
+        $this->logger->method('debug')->willThrowException(new \RuntimeException('stream could not be opened'));
+        $this->fallbackLogger->expects(self::once())->method('debug');
+
+        $cmd = $this->update(Uuid::randomHex(), ['customer_number' => '1']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('1', $cmd->getPayload()['customer_number'], 'unidentified write left untouched even though both loggers were exercised');
     }
 
     public function testInternalFailureOnOneInsertDoesNotBreakTheOthersInTheBatch(): void

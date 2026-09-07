@@ -17,5 +17,13 @@ require __DIR__ . '/../vendor/autoload.php';
  * strips the `final` keyword at include time for test doubling only; it never touches the
  * shipped plugin code (production behaviour, including finality, is unchanged outside the test
  * process).
+ *
+ * `readonly` is left alone (bypassReadOnly: false) - nothing in the test suite needs a readonly
+ * property mutated, so there is no reason to weaken that guarantee even inside the test process.
+ * The rewrite is also restricted to this plugin's own `src/` tree via allowPaths(): every mocked
+ * vendor class used by the suite (SystemConfigService, Doctrine's Connection, ...) is already
+ * non-final, so vendor code never needs to be touched, and scoping the stream-wrapper rewrite
+ * this way keeps it from silently affecting classes it was never meant to change.
  */
-\DG\BypassFinals::enable();
+\DG\BypassFinals::enable(bypassReadOnly: false);
+\DG\BypassFinals::allowPaths([dirname(__DIR__) . '/src/*']);
