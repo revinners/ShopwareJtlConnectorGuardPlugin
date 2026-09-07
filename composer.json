@@ -38,7 +38,7 @@
     "description": {
       "de-DE": "Schützt Shopware-Kundendaten (Kundennummer, E-Mail und Name) vor dem Überschreiben durch den JTL-Connector.",
       "en-GB": "Protects Shopware customer data (customer number, e-mail and name) from being overwritten by the JTL-Connector.",
-      "pl-PL": "Chroni dane klientów Shopware (numer klienta, e-mail i nazwisko) przed nadpisaniem przez JTL-Connector."
+      "pl-PL": "Chroni dane klientów Shopware (numer klienta, e-mail, imię i nazwisko) przed nadpisaniem przez JTL-Connector."
     }
   },
   "config": {

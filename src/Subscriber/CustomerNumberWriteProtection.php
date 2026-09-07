@@ -186,6 +186,12 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
 
         $config = $this->configProvider->load($state->getSalesChannelId());
 
+        // Snapshot the payload exactly as the connector sent it, before guardProtectedFields()
+        // below may revert a protected field via addPayload() (@internal — a key can only be
+        // overwritten, never removed). The identity guard needs what was actually attempted,
+        // not whatever 001 already wrote back into the command.
+        $sent = $command->getPayload();
+
         // Fields the 001 block list already handled (whether or not they changed) are never
         // reverted or logged a second time by the identity guard — but an email 001 already
         // owns is still read for its swap signal, which drives the name policy regardless.
@@ -195,7 +201,7 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         }
 
         if ($config->identity->enabled) {
-            $this->guardIdentity($command, $idHex, $state, $config, $connector, $handled);
+            $this->guardIdentity($command, $idHex, $state, $config, $connector, $handled, $sent);
         }
     }
 
@@ -242,21 +248,25 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
     /**
      * Feature 002: email is the hard identity key; a name change is guarded only per policy.
      *
-     * @param list<string> $handled fields already processed by the 001 block list
+     * @param list<string>        $handled fields already processed by the 001 block list
+     * @param array<string, mixed> $sent   the payload exactly as the connector sent it, captured
+     *                                      before guardProtectedFields() could revert a field
      */
-    private function guardIdentity(UpdateCommand $command, string $idHex, CustomerState $state, GuardConfig $config, ConnectorSource $connector, array $handled): void
+    private function guardIdentity(UpdateCommand $command, string $idHex, CustomerState $state, GuardConfig $config, ConnectorSource $connector, array $handled, array $sent): void
     {
         $identity = $config->identity;
-        $payload = $command->getPayload();
 
-        // Raw signal, independent of $handled: whether 001 already owns the email must never
-        // suppress the fact that this write swaps it — the name policy below needs to see it.
-        $emailSwapped = $command->hasField(self::FIELD_EMAIL)
-            && !$this->sameEmail($payload[self::FIELD_EMAIL], $state->getEmail());
+        // The swap signal is taken from the payload as sent — never from $command->getPayload()
+        // here, because by this point guardProtectedFields() may already have reverted a field
+        // 001 also owns (e.g. email in protectedFields + enforce), which would make an attempted
+        // swap read back as "unchanged". $handled still gates whether *this* step may act on the
+        // field a second time, independent of what drove the swap signal itself.
+        $emailSwapped = \array_key_exists(self::FIELD_EMAIL, $sent)
+            && !$this->sameEmail($sent[self::FIELD_EMAIL], $state->getEmail());
 
         $changedNames = [];
         foreach (self::NAME_FIELDS as $field) {
-            if ($command->hasField($field) && !\in_array($field, $handled, true) && !$this->same($payload[$field], $state->get($field))) {
+            if (\array_key_exists($field, $sent) && !\in_array($field, $handled, true) && !$this->same($sent[$field], $state->get($field))) {
                 $changedNames[] = $field;
             }
         }

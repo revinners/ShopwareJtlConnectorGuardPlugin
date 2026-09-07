@@ -107,9 +107,12 @@ yam-shop.de). Feature 002 extends the guard, with its own switches, independent 
 | `identityGuardMode` | `log_only` | `log_only` = observe; `enforce` = keep the current email / name |
 | `identityGuardProtectName` | `on_email_swap` | `on_email_swap` / `always` / `off` (see above) |
 
-**Caveat:** if `email` is also listed in the 001 `protectedFields`, the 001 guard (and its mode) owns
-the email; the identity guard then only handles the name (per `identityGuardProtectName`) — do not
-list `email` there unless that overlap is intended.
+**Caveat:** if `email` is also listed in the 001 `protectedFields`, the 001 guard (and its mode)
+owns the email field itself — it alone decides whether the email is kept or applied, and the
+identity guard never acts on `email` again. The identity guard still uses the connector's attempted
+email swap to drive the name policy (per `identityGuardProtectName`), so a name swapped in the same
+write is still guarded even though the identity guard does not touch `email`. Do not list `email`
+there unless that overlap is intended.
 
 Rollout mirrors feature 001: deploy in `log_only`, watch `revinners_jtl_guard_log` for
 `observed_identity` rows (`SELECT field, current_value, attempted_value, email FROM revinners_jtl_guard_log WHERE action LIKE '%identity' ORDER BY created_at DESC`),

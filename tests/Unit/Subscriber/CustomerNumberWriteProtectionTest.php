@@ -706,6 +706,34 @@ final class CustomerNumberWriteProtectionTest extends TestCase
     }
 
     /**
+     * F1 round 2: with the number guard `enforce: true`, guardProtectedFields() already reverts
+     * `email` (via addPayload()) before the identity guard runs. The swap signal must still be
+     * taken from what the connector actually sent, not from the command's now-reverted payload
+     * — otherwise the swap looks like "no change" and the name policy is silently disabled.
+     */
+    public function testEnforcedNumberGuardOwningEmailStillDrivesTheNamePolicy(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, protected: ['customer_number', 'email'], identity: $this->identity(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[] = [$e->action, $e->field, $e->mode];
+        });
+
+        $cmd = $this->update($id, ['email' => 'info@motorradgarage-dachau.de', 'last_name' => 'Kühnel']);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('erdoesi@example.com', $cmd->getPayload()['email'], '001 reverts the email it owns');
+        self::assertSame('Erdösi', $cmd->getPayload()['last_name'], 'the attempted email swap still drives the name policy');
+        self::assertSame([
+            [GuardLogEntry::ACTION_BLOCKED_UPDATE, 'email', 'enforce'],
+            [GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'last_name', 'enforce'],
+        ], $logged, 'exactly two entries, no identity entry for email');
+    }
+
+    /**
      * F2: identity `enforce: false` (log_only) with `protectName: always` still observes and
      * logs a name-only change, but never blocks it.
      */
