@@ -357,4 +357,93 @@ final class CustomerNumberWriteProtectionTest extends TestCase
 
         $this->subscriber->onEntityWrite($this->event([$this->update(Uuid::randomHex(), ['customer_number' => '1'])]));
     }
+
+    public function testInternalFailureOnOneInsertDoesNotBreakTheOthersInTheBatch(): void
+    {
+        $id1 = Uuid::randomHex();
+        $id2 = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->connectorDetected();
+
+        $calls = 0;
+        $this->numberRange->method('getValue')->willReturnCallback(static function () use (&$calls): string {
+            ++$calls;
+            if ($calls === 1) {
+                throw new \RuntimeException('number range service down');
+            }
+
+            return '100456';
+        });
+        $this->guardLogger->expects(self::once())->method('log')->with(self::callback(
+            static fn (GuardLogEntry $e): bool => $e->action === GuardLogEntry::ACTION_REMAPPED_CREATE
+                && $e->assignedValue === '100456'
+        ));
+        $this->logger->expects(self::once())->method('error')->with(self::stringContains($id1), self::anything());
+
+        $cmd1 = $this->insert($id1, ['customer_number' => '51520']);
+        $cmd2 = $this->insert($id2, ['customer_number' => '51521']);
+        $this->subscriber->onEntityWrite($this->event([$cmd1, $cmd2]));
+
+        self::assertSame('51520', $cmd1->getPayload()['customer_number'], 'first insert keeps its supplied number after the failure');
+        self::assertSame('100456', $cmd2->getPayload()['customer_number'], 'second insert is still remapped');
+    }
+
+    public function testInternalFailureOnOneUpdateDoesNotBreakTheOthersInTheBatch(): void
+    {
+        $id1 = Uuid::randomHex();
+        $id2 = Uuid::randomHex();
+        $sc = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([
+            $id1 => $this->state($id1, 'C10001', $sc),
+            $id2 => $this->state($id2, 'C10002', $sc),
+        ]);
+
+        $calls = 0;
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$calls): void {
+            ++$calls;
+            if ($calls === 1) {
+                throw new \RuntimeException('log sink down');
+            }
+        });
+        $this->logger->expects(self::once())->method('error')->with(self::stringContains($id1), self::anything());
+
+        $cmd1 = $this->update($id1, ['customer_number' => '10001-x']);
+        $cmd2 = $this->update($id2, ['customer_number' => '10002-x']);
+        $this->subscriber->onEntityWrite($this->event([$cmd1, $cmd2]));
+
+        self::assertSame('C10001', $cmd1->getPayload()['customer_number'], 'first update was already reverted before its log call failed');
+        self::assertSame('C10002', $cmd2->getPayload()['customer_number'], 'second update is still neutralised and logged');
+    }
+
+    public function testLoggedValueIsRenderedByColumnNotByShape(): void
+    {
+        $id = Uuid::randomHex();
+        $sc = Uuid::randomHex();
+        $currentGroup = Uuid::randomBytes();
+        $attemptedGroup = Uuid::randomBytes();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, protected: ['customer_number', 'last_name', 'customer_group_id']));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', $sc, [
+            'last_name' => 'Schröder',
+            'customer_group_id' => $currentGroup,
+        ])]);
+
+        $logged = [];
+        $this->guardLogger->method('log')->willReturnCallback(static function (GuardLogEntry $e) use (&$logged): void {
+            $logged[$e->field] = $e;
+        });
+
+        $cmd = $this->update($id, [
+            'last_name' => 'Schröder-Wagner', // 16 bytes, same length as a binary id, but a plain name
+            'customer_group_id' => $attemptedGroup,
+        ]);
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('Schröder', $logged['last_name']->currentValue);
+        self::assertSame('Schröder-Wagner', $logged['last_name']->attemptedValue, 'a 16-byte plain string is logged verbatim, not mistaken for a binary id');
+        self::assertSame(Uuid::fromBytesToHex($currentGroup), $logged['customer_group_id']->currentValue);
+        self::assertSame(Uuid::fromBytesToHex($attemptedGroup), $logged['customer_group_id']->attemptedValue, 'an *_id column is still rendered as hex');
+    }
 }

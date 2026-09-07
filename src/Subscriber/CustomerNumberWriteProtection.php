@@ -7,6 +7,7 @@ namespace Revinners\ShopwareJtlConnectorGuardPlugin\Subscriber;
 use Psr\Log\LoggerInterface;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSource;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSourceDetector;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerState;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
@@ -124,50 +125,64 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         }
         $states = $this->stateLoader->load($ids);
 
+        // Per-command try/catch: one bad row (state loader race, a throwing log sink, ...)
+        // must not stop the remaining commands in the same batch from being guarded.
         foreach ($updates as $command) {
             $idHex = Uuid::fromBytesToHex((string) $command->getPrimaryKey()['id']);
-            $state = $states[$idHex] ?? null;
-            if ($state === null) {
-                continue; // row vanished between extraction and event; nothing to protect
-            }
 
-            $config = $this->configProvider->load($state->getSalesChannelId());
-            if (!$config->enabled) {
+            try {
+                $this->guardUpdate($command, $idHex, $states[$idHex] ?? null, $connector);
+            } catch (\Throwable $e) {
+                $this->logger->error(
+                    sprintf('jtl_connector_guard: failed to guard customer %s, left untouched: %s', $idHex, $e->getMessage()),
+                    ['exception' => $e, 'customerId' => $idHex]
+                );
+            }
+        }
+    }
+
+    private function guardUpdate(UpdateCommand $command, string $idHex, ?CustomerState $state, ConnectorSource $connector): void
+    {
+        if ($state === null) {
+            return; // row vanished between extraction and event; nothing to protect
+        }
+
+        $config = $this->configProvider->load($state->getSalesChannelId());
+        if (!$config->enabled) {
+            return;
+        }
+
+        $payload = $command->getPayload();
+        foreach ($config->protectedFields as $field) {
+            if (!$command->hasField($field)) {
                 continue;
             }
 
-            $payload = $command->getPayload();
-            foreach ($config->protectedFields as $field) {
-                if (!$command->hasField($field)) {
-                    continue;
-                }
-
-                $attempted = $payload[$field];
-                $current = $state->get($field);
-                if ($this->same($attempted, $current)) {
-                    continue;
-                }
-
-                if ($config->enforce) {
-                    $command->addPayload($field, $current);
-                }
-
-                $this->guardLogger->log(new GuardLogEntry(
-                    action: GuardLogEntry::ACTION_BLOCKED_UPDATE,
-                    mode: $config->mode(),
-                    field: $field,
-                    customerId: $idHex,
-                    email: $state->getEmail(),
-                    firstName: $state->getFirstName(),
-                    lastName: $state->getLastName(),
-                    currentValue: $this->stringOrNull($current),
-                    attemptedValue: $this->stringOrNull($attempted),
-                    assignedValue: null,
-                    integrationId: $connector->integrationId,
-                    integrationLabel: $connector->label,
-                    salesChannelId: $state->getSalesChannelId(),
-                ));
+            $attempted = $payload[$field];
+            $current = $state->get($field);
+            if ($this->same($attempted, $current)) {
+                continue;
             }
+
+            if ($config->enforce) {
+                $command->addPayload($field, $current);
+            }
+
+            $this->guardLogger->log(new GuardLogEntry(
+                action: GuardLogEntry::ACTION_BLOCKED_UPDATE,
+                mode: $config->mode(),
+                field: $field,
+                customerId: $idHex,
+                email: $state->getEmail(),
+                firstName: $state->getFirstName(),
+                lastName: $state->getLastName(),
+                currentValue: $this->renderValue($field, $current),
+                attemptedValue: $this->renderValue($field, $attempted),
+                assignedValue: null,
+                integrationId: $connector->integrationId,
+                integrationLabel: $connector->label,
+                salesChannelId: $state->getSalesChannelId(),
+            ));
         }
     }
 
@@ -176,38 +191,56 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
      */
     private function guardInserts(array $inserts, ConnectorSource $connector, Context $context): void
     {
+        // Per-command try/catch, mirroring guardUpdates: e.g. the number range generator
+        // failing for one new customer must not stop the others in the same batch.
         foreach ($inserts as $command) {
-            $payload = $command->getPayload();
-            $salesChannelId = $this->hexOrNull($payload['sales_channel_id'] ?? null);
+            $idHex = $this->hexOrNull($command->getPrimaryKey()['id'] ?? null);
 
-            $config = $this->configProvider->load($salesChannelId);
-            if (!$config->enabled) {
-                continue;
+            try {
+                $this->guardInsert($command, $connector, $context);
+            } catch (\Throwable $e) {
+                $this->logger->error(
+                    sprintf('jtl_connector_guard: failed to guard new customer %s, left untouched: %s', $idHex ?? 'unknown', $e->getMessage()),
+                    ['exception' => $e, 'customerId' => $idHex]
+                );
             }
-
-            $attempted = $this->stringOrNull($payload[self::FIELD_CUSTOMER_NUMBER] ?? null);
-            $assigned = null;
-            if ($config->enforce) {
-                $assigned = $this->numberRangeGenerator->getValue(CustomerDefinition::ENTITY_NAME, $context, $salesChannelId);
-                $command->addPayload(self::FIELD_CUSTOMER_NUMBER, $assigned);
-            }
-
-            $this->guardLogger->log(new GuardLogEntry(
-                action: GuardLogEntry::ACTION_REMAPPED_CREATE,
-                mode: $config->mode(),
-                field: self::FIELD_CUSTOMER_NUMBER,
-                customerId: $this->hexOrNull($command->getPrimaryKey()['id'] ?? null),
-                email: $this->stringOrNull($payload['email'] ?? null),
-                firstName: $this->stringOrNull($payload['first_name'] ?? null),
-                lastName: $this->stringOrNull($payload['last_name'] ?? null),
-                currentValue: null,
-                attemptedValue: $attempted,
-                assignedValue: $assigned,
-                integrationId: $connector->integrationId,
-                integrationLabel: $connector->label,
-                salesChannelId: $salesChannelId,
-            ));
         }
+    }
+
+    private function guardInsert(InsertCommand $command, ConnectorSource $connector, Context $context): void
+    {
+        $payload = $command->getPayload();
+        $salesChannelId = $this->hexOrNull($payload['sales_channel_id'] ?? null);
+
+        $config = $this->configProvider->load($salesChannelId);
+        if (!$config->enabled) {
+            return;
+        }
+
+        $attempted = $this->renderValue(self::FIELD_CUSTOMER_NUMBER, $payload[self::FIELD_CUSTOMER_NUMBER] ?? null);
+        $assigned = null;
+        if ($config->enforce) {
+            // Resolve the value first: only once it is known do we touch the payload, so a
+            // failing number range generator leaves this insert exactly as the connector sent it.
+            $assigned = $this->numberRangeGenerator->getValue(CustomerDefinition::ENTITY_NAME, $context, $salesChannelId);
+            $command->addPayload(self::FIELD_CUSTOMER_NUMBER, $assigned);
+        }
+
+        $this->guardLogger->log(new GuardLogEntry(
+            action: GuardLogEntry::ACTION_REMAPPED_CREATE,
+            mode: $config->mode(),
+            field: self::FIELD_CUSTOMER_NUMBER,
+            customerId: $this->hexOrNull($command->getPrimaryKey()['id'] ?? null),
+            email: $this->renderValue('email', $payload['email'] ?? null),
+            firstName: $this->renderValue('first_name', $payload['first_name'] ?? null),
+            lastName: $this->renderValue('last_name', $payload['last_name'] ?? null),
+            currentValue: null,
+            attemptedValue: $attempted,
+            assignedValue: $assigned,
+            integrationId: $connector->integrationId,
+            integrationLabel: $connector->label,
+            salesChannelId: $salesChannelId,
+        ));
     }
 
     private function same(mixed $a, mixed $b): bool
@@ -219,19 +252,23 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         return (string) $a === (string) $b;
     }
 
-    private function stringOrNull(mixed $value): ?string
+    /**
+     * Renders a storage-column value for the audit log. Whether a value is a binary id is
+     * decided by the column name (storage columns ending in `_id`), never by the value's shape:
+     * a plain string can coincidentally be exactly 16 bytes (e.g. "Schröder-Wagner", 16 bytes
+     * because of the two-byte "ö"), and guessing from that would corrupt the audit record.
+     */
+    private function renderValue(string $field, mixed $value): ?string
     {
         if ($value === null) {
             return null;
         }
 
-        $string = (string) $value;
-        // binary ids (16 raw bytes) are shown as hex in the log
-        if (\strlen($string) === 16 && !ctype_print($string)) {
-            return Uuid::fromBytesToHex($string);
+        if (str_ends_with($field, '_id') && \is_string($value) && \strlen($value) === 16) {
+            return Uuid::fromBytesToHex($value);
         }
 
-        return $string;
+        return (string) $value;
     }
 
     private function hexOrNull(mixed $bytes): ?string
