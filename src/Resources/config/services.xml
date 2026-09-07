@@ -12,5 +12,8 @@
             <argument type="service" id="Doctrine\DBAL\Connection"/>
             <tag name="kernel.reset" method="reset"/>
         </service>
+        <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader">
+            <argument type="service" id="Doctrine\DBAL\Connection"/>
+        </service>
     </services>
 </container>
