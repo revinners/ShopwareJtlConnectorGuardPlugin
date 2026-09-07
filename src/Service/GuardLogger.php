@@ -25,23 +25,7 @@ final class GuardLogger
 
     public function log(GuardLogEntry $entry): void
     {
-        $this->logger->info(
-            sprintf(
-                '[%s] %s: customer %s <%s> %s %s: kept "%s", connector sent "%s"%s (integration %s "%s")',
-                $entry->mode,
-                $entry->action,
-                $entry->customerId ?? 'new',
-                $entry->email ?? '-',
-                trim(($entry->firstName ?? '') . ' ' . ($entry->lastName ?? '')),
-                $entry->field,
-                $entry->currentValue ?? '',
-                $entry->attemptedValue ?? '',
-                $entry->assignedValue !== null ? sprintf(', assigned "%s"', $entry->assignedValue) : '',
-                $entry->integrationId,
-                $entry->integrationLabel ?? '',
-            ),
-            $entry->toArray()
-        );
+        $this->logger->info($this->message($entry), $entry->toArray());
 
         try {
             $this->connection->insert(ShopwareJtlConnectorGuardPlugin::LOG_TABLE, [
@@ -67,5 +51,61 @@ final class GuardLogger
                 ['exception' => $e] + $entry->toArray()
             );
         }
+    }
+
+    /**
+     * The message states what actually happened, which differs per mode: in `log_only` the
+     * connector's value IS applied, so the line must not claim the old value was kept.
+     */
+    private function message(GuardLogEntry $entry): string
+    {
+        return sprintf(
+            '[%s] %s: customer %s <%s> %s %s: %s (integration %s "%s")',
+            $entry->mode,
+            $entry->action,
+            $entry->customerId ?? 'new',
+            $entry->email ?? '-',
+            trim(($entry->firstName ?? '') . ' ' . ($entry->lastName ?? '')),
+            $entry->field,
+            $entry->action === GuardLogEntry::ACTION_REMAPPED_CREATE
+                ? $this->createOutcome($entry)
+                : $this->updateOutcome($entry),
+            $entry->integrationId,
+            $entry->integrationLabel ?? '',
+        );
+    }
+
+    private function updateOutcome(GuardLogEntry $entry): string
+    {
+        if ($entry->mode === GuardConfigProvider::MODE_ENFORCE) {
+            return sprintf(
+                'kept "%s", connector sent "%s"',
+                $entry->currentValue ?? '',
+                $entry->attemptedValue ?? '',
+            );
+        }
+
+        return sprintf(
+            'connector sent "%s" over "%s" and it was applied; enforce mode would have kept "%s"',
+            $entry->attemptedValue ?? '',
+            $entry->currentValue ?? '',
+            $entry->currentValue ?? '',
+        );
+    }
+
+    private function createOutcome(GuardLogEntry $entry): string
+    {
+        if ($entry->assignedValue !== null) {
+            return sprintf(
+                'connector sent "%s", assigned "%s" from the shop number range',
+                $entry->attemptedValue ?? '',
+                $entry->assignedValue,
+            );
+        }
+
+        return sprintf(
+            'connector sent "%s" and it was applied; enforce mode would have assigned a number from the shop range',
+            $entry->attemptedValue ?? '',
+        );
     }
 }

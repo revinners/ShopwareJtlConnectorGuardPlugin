@@ -13,11 +13,11 @@ use Shopware\Core\Framework\Uuid\Uuid;
 
 final class GuardLoggerTest extends TestCase
 {
-    private function entry(): GuardLogEntry
+    private function entry(string $mode = 'enforce'): GuardLogEntry
     {
         return new GuardLogEntry(
             action: GuardLogEntry::ACTION_BLOCKED_UPDATE,
-            mode: 'enforce',
+            mode: $mode,
             field: 'customer_number',
             customerId: '019df771764772929f1136e52180ccf6',
             email: 'erdoesi@example.com',
@@ -77,6 +77,85 @@ final class GuardLoggerTest extends TestCase
         $connection->method('insert')->willThrowException(new \RuntimeException('table gone'));
 
         (new GuardLogger($logger, $connection))->log($this->entry());
+    }
+
+    /**
+     * Regression (local verification on yam-shop 6.6.10.18): in log_only the connector's value
+     * IS written, so a line claiming the old value was "kept" misreports the default mode.
+     */
+    public function testLogOnlyUpdateMessageDoesNotClaimTheValueWasKept(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info')->with(
+            self::callback(static function (string $message): bool {
+                return !str_contains($message, 'kept "C10009",')
+                    && str_contains($message, 'connector sent "10009" over "C10009" and it was applied')
+                    && str_contains($message, 'enforce mode would have kept "C10009"');
+            }),
+            self::anything(),
+        );
+
+        (new GuardLogger($logger, $this->createMock(Connection::class)))->log($this->entry(mode: 'log_only'));
+    }
+
+    /**
+     * Regression: an insert has no current value, so the create line must name the assigned
+     * number instead of printing an empty `kept ""`.
+     */
+    public function testRemappedCreateMessageNamesTheAssignedNumber(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info')->with(
+            self::callback(static function (string $message): bool {
+                return !str_contains($message, 'kept ""')
+                    && str_contains($message, 'connector sent "51520", assigned "10011" from the shop number range');
+            }),
+            self::anything(),
+        );
+
+        (new GuardLogger($logger, $this->createMock(Connection::class)))->log(new GuardLogEntry(
+            action: GuardLogEntry::ACTION_REMAPPED_CREATE,
+            mode: 'enforce',
+            field: 'customer_number',
+            customerId: '019df771764772929f1136e52180ccf6',
+            email: 'new@example.com',
+            firstName: 'Guard',
+            lastName: 'Created',
+            currentValue: null,
+            attemptedValue: '51520',
+            assignedValue: '10011',
+            integrationId: '2103c0f8ba934cbdb291287aaa3b5ce8',
+            integrationLabel: 'JTL Connector',
+            salesChannelId: null,
+        ));
+    }
+
+    public function testLogOnlyCreateMessageSaysTheConnectorNumberWasApplied(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info')->with(
+            self::callback(static fn (string $message): bool => str_contains(
+                $message,
+                'connector sent "51520" and it was applied; enforce mode would have assigned a number from the shop range'
+            )),
+            self::anything(),
+        );
+
+        (new GuardLogger($logger, $this->createMock(Connection::class)))->log(new GuardLogEntry(
+            action: GuardLogEntry::ACTION_REMAPPED_CREATE,
+            mode: 'log_only',
+            field: 'customer_number',
+            customerId: null,
+            email: 'new@example.com',
+            firstName: 'Guard',
+            lastName: 'Created',
+            currentValue: null,
+            attemptedValue: '51520',
+            assignedValue: null,
+            integrationId: '2103c0f8ba934cbdb291287aaa3b5ce8',
+            integrationLabel: 'JTL Connector',
+            salesChannelId: null,
+        ));
     }
 
     public function testEntryToArrayIsFlat(): void
