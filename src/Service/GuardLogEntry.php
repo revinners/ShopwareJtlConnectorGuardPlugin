@@ -13,6 +13,12 @@ final readonly class GuardLogEntry
 
     public const ACTION_REMAPPED_CREATE = 'remapped_create';
 
+    /** Feature 002: the guard wrote the current identity value back (enforce). */
+    public const ACTION_BLOCKED_IDENTITY = 'blocked_identity';
+
+    /** Feature 002: an identity change was recorded but applied (log_only, or an unprotected name change). */
+    public const ACTION_OBSERVED_IDENTITY = 'observed_identity';
+
     public function __construct(
         public string $action,
         public string $mode,

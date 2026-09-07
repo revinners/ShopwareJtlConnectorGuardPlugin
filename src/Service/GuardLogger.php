@@ -87,6 +87,8 @@ final class GuardLogger
     /**
      * The message states what actually happened, which differs per mode: in `log_only` the
      * connector's value IS applied, so the line must not claim the old value was kept.
+     * Identity actions carry their outcome in the action itself (`blocked_*` = kept,
+     * `observed_*` = applied), so they do not depend on `mode`.
      */
     private function message(GuardLogEntry $entry): string
     {
@@ -98,9 +100,20 @@ final class GuardLogger
             $entry->email ?? '-',
             trim(($entry->firstName ?? '') . ' ' . ($entry->lastName ?? '')),
             $entry->field,
-            $entry->action === GuardLogEntry::ACTION_REMAPPED_CREATE
-                ? $this->createOutcome($entry)
-                : $this->updateOutcome($entry),
+            match ($entry->action) {
+                GuardLogEntry::ACTION_REMAPPED_CREATE => $this->createOutcome($entry),
+                GuardLogEntry::ACTION_BLOCKED_IDENTITY => sprintf(
+                    'kept "%s", connector sent "%s" (identity guard)',
+                    $entry->currentValue ?? '',
+                    $entry->attemptedValue ?? '',
+                ),
+                GuardLogEntry::ACTION_OBSERVED_IDENTITY => sprintf(
+                    'connector sent "%s" over "%s" and it was applied (identity guard, observed only)',
+                    $entry->attemptedValue ?? '',
+                    $entry->currentValue ?? '',
+                ),
+                default => $this->updateOutcome($entry),
+            },
             $entry->integrationId,
             $entry->integrationLabel ?? '',
         );

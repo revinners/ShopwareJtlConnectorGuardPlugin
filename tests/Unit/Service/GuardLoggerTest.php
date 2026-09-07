@@ -208,4 +208,62 @@ final class GuardLoggerTest extends TestCase
         self::assertSame('Adam', $array['firstName']);
         self::assertArrayHasKey('integrationLabel', $array);
     }
+
+    private function identityEntry(string $action, string $mode, string $field = 'email'): GuardLogEntry
+    {
+        return new GuardLogEntry(
+            action: $action,
+            mode: $mode,
+            field: $field,
+            customerId: '019daaeff59572c2a4f5c068e613edb5',
+            email: 'tobiasschroeer1999@web.de',
+            firstName: 'Tobias',
+            lastName: 'Schröer',
+            currentValue: $field === 'email' ? 'tobiasschroeer1999@web.de' : 'Schröer',
+            attemptedValue: $field === 'email' ? 'info@motorradgarage-dachau.de' : 'Kühnel',
+            assignedValue: null,
+            integrationId: '019b8946ccc67767b9fb8cb524300ba1',
+            integrationLabel: 'JTL Connector',
+            salesChannelId: null,
+        );
+    }
+
+    public function testBlockedIdentityMessageSaysTheEmailWasKept(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info')->with(self::logicalAnd(
+            self::stringContains('blocked_identity'),
+            self::stringContains('kept "tobiasschroeer1999@web.de"'),
+            self::stringContains('connector sent "info@motorradgarage-dachau.de"'),
+            self::stringContains('identity guard'),
+        ), self::anything());
+
+        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $this->createMock(Connection::class)))
+            ->log($this->identityEntry(GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'enforce'));
+    }
+
+    public function testObservedIdentityInEnforceModeSaysTheValueWasApplied(): void
+    {
+        // an unprotected name-only change is observed even while the identity guard is in enforce
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info')->with(self::logicalAnd(
+            self::stringContains('observed_identity'),
+            self::stringContains('connector sent "Kühnel" over "Schröer" and it was applied'),
+            self::logicalNot(self::stringContains('kept "')),
+        ), self::anything());
+
+        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $this->createMock(Connection::class)))
+            ->log($this->identityEntry(GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'enforce', 'last_name'));
+    }
+
+    public function testIdentityRowIsPersistedWithItsAction(): void
+    {
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('insert')->with('revinners_jtl_guard_log', self::callback(
+            static fn (array $row): bool => $row['action'] === 'observed_identity' && $row['field'] === 'email' && $row['mode'] === 'log_only'
+        ));
+
+        (new GuardLogger($this->createMock(LoggerInterface::class), $this->createMock(LoggerInterface::class), $connection))
+            ->log($this->identityEntry(GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'log_only'));
+    }
 }
