@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/shopware/platform/trunk/src/Core/System/SystemConfig/Schema/config.xsd">
+
+    <card>
+        <title>JTL-Connector Guard — customer number protection</title>
+        <title lang="de-DE">JTL-Connector Guard — Kundennummern-Schutz</title>
+        <title lang="pl-PL">JTL-Connector Guard — ochrona numerów klientów</title>
+
+        <input-field type="bool">
+            <name>enabled</name>
+            <label>Enabled</label>
+            <label lang="de-DE">Aktiv</label>
+            <label lang="pl-PL">Włączone</label>
+            <helpText>Master switch. When off, the plugin does nothing at all.</helpText>
+            <helpText lang="de-DE">Hauptschalter. Wenn aus, tut das Plugin gar nichts.</helpText>
+            <helpText lang="pl-PL">Główny przełącznik. Wyłączony = plugin nic nie robi.</helpText>
+            <defaultValue>true</defaultValue>
+        </input-field>
+
+        <input-field type="single-select">
+            <name>mode</name>
+            <label>Mode</label>
+            <label lang="de-DE">Modus</label>
+            <label lang="pl-PL">Tryb</label>
+            <helpText>"Log only" records every attempt but changes nothing (use first on production to confirm detection). "Enforce" blocks connector changes to the customer number and assigns a number from the shop's own range to connector-created customers.</helpText>
+            <helpText lang="de-DE">"Nur protokollieren" zeichnet jeden Versuch auf, ändert aber nichts (zuerst in Produktion verwenden). "Durchsetzen" blockiert Kundennummer-Änderungen des Connectors und vergibt für vom Connector angelegte Kunden eine Nummer aus dem Nummernkreis des Shops.</helpText>
+            <helpText lang="pl-PL">"Tylko loguj" zapisuje każdą próbę, nic nie zmienia (użyj najpierw na produkcji). "Wymuszaj" blokuje zmiany numeru klienta przez connector i nadaje klientom tworzonym przez connector numer z własnego zakresu sklepu.</helpText>
+            <options>
+                <option>
+                    <id>log_only</id>
+                    <name>Log only</name>
+                    <name lang="de-DE">Nur protokollieren</name>
+                    <name lang="pl-PL">Tylko loguj</name>
+                </option>
+                <option>
+                    <id>enforce</id>
+                    <name>Enforce</name>
+                    <name lang="de-DE">Durchsetzen</name>
+                    <name lang="pl-PL">Wymuszaj</name>
+                </option>
+            </options>
+            <defaultValue>log_only</defaultValue>
+        </input-field>
+
+        <input-field type="text">
+            <name>integrationLabels</name>
+            <label>Connector integration label(s)</label>
+            <label lang="de-DE">Integrations-Bezeichnung(en) des Connectors</label>
+            <label lang="pl-PL">Nazwa/nazwy integracji connectora</label>
+            <helpText>Comma-separated labels of the Admin API integrations (Settings > System > Integrations) used by the JTL-Connector. Matched case-insensitively. Writes from any other integration, admin user or the storefront are never touched.</helpText>
+            <helpText lang="de-DE">Kommagetrennte Bezeichnungen der Admin-API-Integrationen (Einstellungen > System > Integrationen), die der JTL-Connector verwendet. Groß-/Kleinschreibung egal. Schreibvorgänge anderer Integrationen, Admin-Benutzer oder der Storefront werden nie angefasst.</helpText>
+            <helpText lang="pl-PL">Nazwy (po przecinku) integracji Admin API (Ustawienia > System > Integracje) używanych przez JTL-Connector. Wielkość liter bez znaczenia. Zapisy innych integracji, użytkowników admina i storefrontu nigdy nie są modyfikowane.</helpText>
+            <placeholder>JTL-Connector</placeholder>
+            <defaultValue>JTL-Connector</defaultValue>
+        </input-field>
+
+        <input-field type="text">
+            <name>integrationIds</name>
+            <label>Connector integration id(s) — optional</label>
+            <label lang="de-DE">Integrations-ID(s) des Connectors — optional</label>
+            <label lang="pl-PL">ID integracji connectora — opcjonalnie</label>
+            <helpText>Comma-separated 32-char hex ids of the integrations, if you prefer matching by id instead of (or in addition to) the label.</helpText>
+            <helpText lang="de-DE">Kommagetrennte 32-stellige Hex-IDs der Integrationen, falls statt (oder zusätzlich zur) Bezeichnung per ID zugeordnet werden soll.</helpText>
+            <helpText lang="pl-PL">32-znakowe identyfikatory hex integracji (po przecinku), jeśli wolisz dopasowanie po id zamiast (lub oprócz) nazwy.</helpText>
+        </input-field>
+
+        <input-field type="text">
+            <name>protectedFields</name>
+            <label>Protected customer columns</label>
+            <label lang="de-DE">Geschützte Kundenspalten</label>
+            <label lang="pl-PL">Chronione kolumny klienta</label>
+            <helpText>Comma-separated storage column names of the customer table the connector may NOT change on existing customers. "customer_number" is always protected, even if removed here. Scalar columns only.</helpText>
+            <helpText lang="de-DE">Kommagetrennte Spaltennamen der Kundentabelle, die der Connector bei bestehenden Kunden NICHT ändern darf. "customer_number" ist immer geschützt. Nur skalare Spalten.</helpText>
+            <helpText lang="pl-PL">Nazwy kolumn tabeli klienta (po przecinku), których connector NIE może zmieniać u istniejących klientów. "customer_number" jest chronione zawsze. Tylko kolumny skalarne.</helpText>
+            <placeholder>customer_number</placeholder>
+            <defaultValue>customer_number</defaultValue>
+        </input-field>
+    </card>
+</config>
