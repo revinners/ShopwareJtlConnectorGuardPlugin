@@ -13,6 +13,10 @@ class GuardLogEntity extends Entity
 
     protected ?string $customerId = null;
 
+    protected string $entity = 'customer';
+
+    protected ?string $entityId = null;
+
     protected ?string $email = null;
 
     protected ?string $firstName = null;
@@ -40,6 +44,16 @@ class GuardLogEntity extends Entity
     public function getCustomerId(): ?string
     {
         return $this->customerId;
+    }
+
+    public function getEntity(): string
+    {
+        return $this->entity;
+    }
+
+    public function getEntityId(): ?string
+    {
+        return $this->entityId;
     }
 
     public function getEmail(): ?string

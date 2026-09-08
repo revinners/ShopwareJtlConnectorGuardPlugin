@@ -49,6 +49,8 @@ class GuardLogDefinition extends EntityDefinition
         return new FieldCollection([
             (new IdField('id', 'id'))->addFlags(new Required(), new PrimaryKey()),
             new IdField('customer_id', 'customerId'),
+            (new StringField('entity', 'entity', 32))->addFlags(new Required()),
+            new IdField('entity_id', 'entityId'),
             new StringField('email', 'email'),
             new StringField('first_name', 'firstName'),
             new StringField('last_name', 'lastName'),
