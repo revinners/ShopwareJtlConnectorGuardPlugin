@@ -76,4 +76,15 @@ final class ValuesTest extends TestCase
         self::assertFalse(Values::sameStorage(null, '[]'));
         self::assertTrue(Values::sameStorage(true, '1'));
     }
+
+    /**
+     * F1 regression: CustomerStateLoader does SELECT *, so a guarded write touching password
+     * (spec R5) would otherwise put the bcrypt hash into the DB audit row and the channel log.
+     */
+    public function testRenderRedactsSecretAndPiiColumns(): void
+    {
+        self::assertSame('***', Values::render('password', '$2y$10$abc'));
+        self::assertSame('***', Values::render('remote_address', '10.0.0.1'));
+        self::assertSame('Dr.', Values::render('title', 'Dr.'));
+    }
 }

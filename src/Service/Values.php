@@ -14,6 +14,14 @@ use Shopware\Core\Framework\Uuid\Uuid;
  */
 final class Values
 {
+    /**
+     * Columns whose real value must never leave the guard's own decision: secrets
+     * (`password`, `legacy_password`, `legacy_encoder`) and PII (`remote_address`, an IP) that
+     * `CustomerStateLoader`'s `SELECT *` pulls in like any other column. The guard still
+     * keeps/reverts the real value; only the audit record (channel log line and DB row) is redacted.
+     */
+    private const REDACTED_COLUMNS = ['password', 'legacy_password', 'legacy_encoder', 'remote_address'];
+
     private function __construct()
     {
     }
@@ -78,6 +86,10 @@ final class Values
     {
         if ($value === null) {
             return null;
+        }
+
+        if (\in_array($field, self::REDACTED_COLUMNS, true)) {
+            return '***';
         }
 
         if (str_ends_with($field, '_id') && \is_string($value) && \strlen($value) === 16) {
