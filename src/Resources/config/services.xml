@@ -15,6 +15,9 @@
         <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader">
             <argument type="service" id="Doctrine\DBAL\Connection"/>
         </service>
+        <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerAddressStateLoader">
+            <argument type="service" id="Doctrine\DBAL\Connection"/>
+        </service>
 
         <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Core\Content\GuardLog\GuardLogDefinition">
             <tag name="shopware.entity.definition" entity="revinners_jtl_guard_log"/>
