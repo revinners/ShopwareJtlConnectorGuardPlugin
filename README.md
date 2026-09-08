@@ -138,7 +138,9 @@ independent of 001 and 002:
 - **Customer custom fields:** the connector owns the `custom_jtl` custom-field set and pushes Wawi's
   notes `anmerkung` and `hinweis_(intern)`; those two keys are allowed by default
   (`allowedCustomFields`, enter `none` to allow nothing). Any other key is guarded per key, logged as
-  `custom_fields.<key>`.
+  `custom_fields.<key>`. In `enforce`, a guarded key the customer did not have before is written back
+  as JSON `null` (the DAL cannot remove a key), so `custom_fields` may accrete `"<key>": null`
+  entries; harmless for the admin, which renders null as empty.
 - **Addresses:** an update of an existing customer's address is guarded column by column with no
   allow-list (`blocked_address` / `observed_address`). A **new or deleted address** of an existing
   customer cannot be removed from the connector's write by the DAL, so it is recorded one row per
@@ -147,6 +149,9 @@ independent of 001 and 002:
   With `addressCreateDeletePolicy=reject_write` **and** `fieldGuardMode=enforce` the whole connector
   write is rejected instead (`rejected_write`). That fails every customer in the same sync batch, so
   keep the default `log` unless the log shows creates/deletes actually happening.
+  `fieldGuardEnabled` is read from the global config to decide whether address commands are
+  inspected at all; a shop that disables it globally and re-enables it for one sales channel gets
+  customer-column guarding but no address guarding on that channel.
 - Connector-created customers (and their addresses) are not affected. Admin, storefront, CLI and
   other-integration writes are never touched.
 - Audit rows for addresses carry `entity = customer_address` and `entity_id` (the address id);
@@ -164,7 +169,10 @@ independent of 001 and 002:
 **Precedence:** 001 → 002 → 003. A column 001 lists in `protectedFields` is handled by 001 only.
 `email`, `first_name`, `last_name` are handled by 002 only while `identityGuardEnabled` is on — so
 to have names kept under the allow-list, set `identityGuardProtectName` to `always`; with the
-identity guard disabled those three columns fall to 003 like any other column.
+identity guard disabled those three columns fall to 003 like any other column. With the identity
+guard enabled and `identityGuardProtectName=off`, a connector name change is neither kept nor
+recorded by any guard (002 skips it by policy and 003 leaves the identity columns to 002); use
+`always` under the allow-list.
 
 **Rollout:** the point of this feature is the observation window. Deploy in `log_only` for one or
 two months: every `observed_*` row holds the value the connector replaced, keyed by customer and
@@ -173,6 +181,12 @@ see spec "Out of scope"). Then switch `fieldGuardMode` to `enforce`. As with 001
 the damage keeps happening while you observe. A `rejected_write` DB row can be rolled back together
 with the write it rejected; the channel file line is the reliable record for that action. Before
 `enforce` on ducati-world24.com, run the custom-fields pre-check SQL from the spec there too.
+
+**Upgrading an installed plugin in place:** replace the files, then `bin/console cache:clear` →
+`plugin:refresh` → `plugin:update ShopwareJtlConnectorGuardPlugin` → `cache:clear`. Running
+`plugin:refresh` against a warm container compiled from the previous version fails with a
+constructor TypeError (`Argument #6 ($fieldGuard) must be of type FieldGuard`) and, on production,
+breaks every customer write until the cache is cleared.
 
 ## Development
 
@@ -185,3 +199,8 @@ Unit tests mock the plugin's `final` services, so `dg/bypass-finals` is enabled 
 
 Local shop integration: copy the plugin into `custom/plugins/ShopwareJtlConnectorGuardPlugin` of the
 shop checkout, then `bin/console plugin:refresh && bin/console plugin:install --activate ShopwareJtlConnectorGuardPlugin`.
+**Upgrading an installed plugin in place:** replace the files, then `bin/console cache:clear` →
+`plugin:refresh` → `plugin:update ShopwareJtlConnectorGuardPlugin` → `cache:clear`. Running
+`plugin:refresh` against a warm container compiled from the previous version fails with a
+constructor TypeError (`Argument #6 ($fieldGuard) must be of type FieldGuard`) and, on production,
+breaks every customer write until the cache is cleared.
