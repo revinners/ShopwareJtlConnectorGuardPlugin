@@ -29,6 +29,10 @@
             <argument type="service" id="Doctrine\DBAL\Connection"/>
         </service>
 
+        <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuard">
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger"/>
+        </service>
+
         <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Subscriber\CustomerNumberWriteProtection">
             <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider"/>
             <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSourceDetector"/>
