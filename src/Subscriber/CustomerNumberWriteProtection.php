@@ -14,6 +14,7 @@ use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogEntry;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\IdentityGuardConfig;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\Values;
 use Shopware\Core\Checkout\Customer\CustomerDefinition;
 use Shopware\Core\Framework\Api\Context\AdminApiSource;
 use Shopware\Core\Framework\Context;
@@ -222,7 +223,7 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
 
             $attempted = $payload[$field];
             $current = $state->get($field);
-            if ($this->same($attempted, $current)) {
+            if (Values::same($attempted, $current)) {
                 continue;
             }
 
@@ -237,8 +238,8 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
                 $idHex,
                 $state,
                 $connector,
-                $this->renderValue($field, $current),
-                $this->renderValue($field, $attempted),
+                Values::render($field, $current),
+                Values::render($field, $attempted),
             ));
         }
 
@@ -266,7 +267,7 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
 
         $changedNames = [];
         foreach (self::NAME_FIELDS as $field) {
-            if (\array_key_exists($field, $sent) && !\in_array($field, $handled, true) && !$this->same($sent[$field], $state->get($field))) {
+            if (\array_key_exists($field, $sent) && !\in_array($field, $handled, true) && !Values::same($sent[$field], $state->get($field))) {
                 $changedNames[] = $field;
             }
         }
@@ -303,8 +304,8 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
             $idHex,
             $state,
             $connector,
-            $this->renderValue($field, $current),
-            $this->renderValue($field, $attempted),
+            Values::render($field, $current),
+            Values::render($field, $attempted),
         ));
     }
 
@@ -347,7 +348,7 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
         // Per-command try/catch, mirroring guardUpdates: e.g. the number range generator
         // failing for one new customer must not stop the others in the same batch.
         foreach ($inserts as $command) {
-            $idHex = $this->hexOrNull($command->getPrimaryKey()['id'] ?? null);
+            $idHex = Values::hexOrNull($command->getPrimaryKey()['id'] ?? null);
 
             try {
                 $this->guardInsert($command, $connector, $context);
@@ -364,14 +365,14 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
     private function guardInsert(InsertCommand $command, ConnectorSource $connector, Context $context): void
     {
         $payload = $command->getPayload();
-        $salesChannelId = $this->hexOrNull($payload['sales_channel_id'] ?? null);
+        $salesChannelId = Values::hexOrNull($payload['sales_channel_id'] ?? null);
 
         $config = $this->configProvider->load($salesChannelId);
         if (!$config->enabled) {
             return;
         }
 
-        $attempted = $this->renderValue(self::FIELD_CUSTOMER_NUMBER, $payload[self::FIELD_CUSTOMER_NUMBER] ?? null);
+        $attempted = Values::render(self::FIELD_CUSTOMER_NUMBER, $payload[self::FIELD_CUSTOMER_NUMBER] ?? null);
         $assigned = null;
         if ($config->enforce) {
             // Resolve the value first: only once it is known do we touch the payload, so a
@@ -384,10 +385,10 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
             action: GuardLogEntry::ACTION_REMAPPED_CREATE,
             mode: $config->mode(),
             field: self::FIELD_CUSTOMER_NUMBER,
-            customerId: $this->hexOrNull($command->getPrimaryKey()['id'] ?? null),
-            email: $this->renderValue('email', $payload['email'] ?? null),
-            firstName: $this->renderValue('first_name', $payload['first_name'] ?? null),
-            lastName: $this->renderValue('last_name', $payload['last_name'] ?? null),
+            customerId: Values::hexOrNull($command->getPrimaryKey()['id'] ?? null),
+            email: Values::render('email', $payload['email'] ?? null),
+            firstName: Values::render('first_name', $payload['first_name'] ?? null),
+            lastName: Values::render('last_name', $payload['last_name'] ?? null),
             currentValue: null,
             attemptedValue: $attempted,
             assignedValue: $assigned,
@@ -395,38 +396,5 @@ final class CustomerNumberWriteProtection implements EventSubscriberInterface
             integrationLabel: $connector->label,
             salesChannelId: $salesChannelId,
         ));
-    }
-
-    private function same(mixed $a, mixed $b): bool
-    {
-        if ($a === null || $b === null) {
-            return $a === $b;
-        }
-
-        return (string) $a === (string) $b;
-    }
-
-    /**
-     * Renders a storage-column value for the audit log. Whether a value is a binary id is
-     * decided by the column name (storage columns ending in `_id`), never by the value's shape:
-     * a plain string can coincidentally be exactly 16 bytes (e.g. "Schröder-Wagner", 16 bytes
-     * because of the two-byte "ö"), and guessing from that would corrupt the audit record.
-     */
-    private function renderValue(string $field, mixed $value): ?string
-    {
-        if ($value === null) {
-            return null;
-        }
-
-        if (str_ends_with($field, '_id') && \is_string($value) && \strlen($value) === 16) {
-            return Uuid::fromBytesToHex($value);
-        }
-
-        return (string) $value;
-    }
-
-    private function hexOrNull(mixed $bytes): ?string
-    {
-        return \is_string($bytes) && \strlen($bytes) === 16 ? Uuid::fromBytesToHex($bytes) : null;
     }
 }
