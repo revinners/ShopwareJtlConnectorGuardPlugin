@@ -173,7 +173,7 @@ final class AddressGuard
                 continue;
             }
             $currentValue = $address->get($column);
-            if (Values::same($attempted, $currentValue)) {
+            if (Values::sameStorage($attempted, $currentValue)) {
                 continue;
             }
             if ($config->enforce) {

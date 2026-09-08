@@ -47,7 +47,7 @@ final class FieldGuard
             }
 
             $current = $state->get($column);
-            if (Values::same($attempted, $current)) {
+            if (Values::sameStorage($attempted, $current)) {
                 continue;
             }
 

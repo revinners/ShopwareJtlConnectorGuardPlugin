@@ -32,6 +32,31 @@ final class Values
     }
 
     /**
+     * Storage-aware comparison for column values: scalars as in same(); two strings that both
+     * parse as JSON arrays/objects are compared structurally, because MySQL hands JSON columns
+     * back re-serialised (a space after every "," and ":") while the DAL sends compact json_encode
+     * output. Two strings are treated as JSON only when BOTH decode without error to an array —
+     * anything else falls back to the plain comparison, so two different malformed strings never
+     * compare equal.
+     */
+    public static function sameStorage(mixed $attempted, mixed $current): bool
+    {
+        if (self::same($attempted, $current)) {
+            return true;
+        }
+        if (!\is_string($attempted) || !\is_string($current)) {
+            return false;
+        }
+        $a = self::tryDecodeJson($attempted);
+        $b = self::tryDecodeJson($current);
+        if ($a === null || $b === null) {
+            return false;
+        }
+
+        return self::sameJson($a, $b);
+    }
+
+    /**
      * Custom-field values: scalars as in same(), arrays/objects by canonical JSON.
      */
     public static function sameJson(mixed $a, mixed $b): bool
@@ -92,6 +117,22 @@ final class Values
         }
 
         return \is_array($decoded) ? $decoded : [];
+    }
+
+    /** @return array<mixed>|null null when the string is not a JSON array/object */
+    private static function tryDecodeJson(string $raw): ?array
+    {
+        $trimmed = ltrim($raw);
+        if ($trimmed === '' || ($trimmed[0] !== '[' && $trimmed[0] !== '{')) {
+            return null;
+        }
+        try {
+            $decoded = json_decode($raw, true, 512, \JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return null;
+        }
+
+        return \is_array($decoded) ? $decoded : null;
     }
 
     private static function scalar(mixed $value): string

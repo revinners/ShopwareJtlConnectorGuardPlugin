@@ -60,4 +60,20 @@ final class ValuesTest extends TestCase
         self::assertSame([], Values::decodeJson('not json'));
         self::assertSame(['k' => 1], Values::decodeJson(['k' => 1]));
     }
+
+    /**
+     * F1 regression: MySQL re-serialises JSON columns (space after every "," and ":") while the
+     * DAL sends compact json_encode output, so a plain-column comparison must decode both sides
+     * before comparing when they are both JSON.
+     */
+    public function testSameStorageComparesJsonColumnsStructurally(): void
+    {
+        self::assertTrue(Values::sameStorage('["a","b"]', '["a", "b"]'));
+        self::assertTrue(Values::sameStorage('{"x":1,"y":2}', '{"y": 2, "x": 1}'));
+        self::assertFalse(Values::sameStorage('["a"]', '["b"]'));
+        self::assertFalse(Values::sameStorage('[foo', '[bar'), 'two different malformed strings never compare equal');
+        self::assertTrue(Values::sameStorage('abc', 'abc'));
+        self::assertFalse(Values::sameStorage(null, '[]'));
+        self::assertTrue(Values::sameStorage(true, '1'));
+    }
 }

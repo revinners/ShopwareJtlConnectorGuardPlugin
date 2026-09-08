@@ -148,6 +148,21 @@ final class FieldGuardTest extends TestCase
         self::assertSame([], $this->logged);
     }
 
+    /**
+     * F1 regression: MySQL re-serialises JSON columns with a space after every "," and ":"; the
+     * DAL sends compact json_encode output. A structurally identical vat_ids must not be flagged.
+     */
+    public function testReserialisedJsonColumnIsNotFlaggedAsChanged(): void
+    {
+        $id = Uuid::randomHex();
+        $cmd = $this->update($id, ['vat_ids' => '["DE1","DE2"]']);
+
+        $this->guard->guardCustomerColumns($cmd, $id, $this->state($id, ['vat_ids' => '["DE1", "DE2"]']), $this->config(enforce: true), $this->connector, [], $cmd->getPayload());
+
+        self::assertSame('["DE1","DE2"]', $cmd->getPayload()['vat_ids'], 'not reverted: structurally unchanged');
+        self::assertSame([], $this->logged, 'no spurious observed/blocked row');
+    }
+
     public function testColumnsOwnedBy001And002AreSkipped(): void
     {
         $id = Uuid::randomHex();
