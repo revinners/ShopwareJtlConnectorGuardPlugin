@@ -150,4 +150,95 @@
             <defaultValue>on_email_swap</defaultValue>
         </input-field>
     </card>
+
+    <card>
+        <title>JTL-Connector Guard — field allow-list (customer + address)</title>
+        <title lang="de-DE">JTL-Connector Guard — Feld-Freigabeliste (Kunde + Adresse)</title>
+        <title lang="pl-PL">JTL-Connector Guard — lista dozwolonych pól (klient + adres)</title>
+
+        <input-field type="bool">
+            <name>fieldGuardEnabled</name>
+            <label>Field guard enabled</label>
+            <label lang="de-DE">Feldschutz aktiv</label>
+            <label lang="pl-PL">Ochrona pól włączona</label>
+            <helpText>On an existing customer the JTL-Connector may change only the allowed columns below; every other customer column, custom field and address column is kept (enforce) or recorded (log only). Independent of the two guards above.</helpText>
+            <helpText lang="de-DE">Bei bestehenden Kunden darf der JTL-Connector nur die unten freigegebenen Spalten ändern; alle anderen Kundenspalten, Zusatzfelder und Adressspalten werden behalten (Durchsetzen) bzw. protokolliert (Nur protokollieren). Unabhängig von den beiden Schutzfunktionen oben.</helpText>
+            <helpText lang="pl-PL">U istniejącego klienta JTL-Connector może zmieniać tylko dozwolone kolumny poniżej; każda inna kolumna klienta, pole dodatkowe i kolumna adresu jest zachowywana (Wymuszaj) lub zapisywana (Tylko loguj). Niezależne od dwóch ochron powyżej.</helpText>
+            <defaultValue>true</defaultValue>
+        </input-field>
+
+        <input-field type="single-select">
+            <name>fieldGuardMode</name>
+            <label>Field guard mode</label>
+            <label lang="de-DE">Modus Feldschutz</label>
+            <label lang="pl-PL">Tryb ochrony pól</label>
+            <helpText>"Log only" records every disallowed change with the value it replaced, but applies it (use first on production, for one or two months: the log is the repair source). "Enforce" keeps the current value and applies the rest of the connector's write.</helpText>
+            <helpText lang="de-DE">"Nur protokollieren" zeichnet jede nicht freigegebene Änderung samt dem ersetzten Wert auf, wendet sie aber an (zuerst in Produktion, ein bis zwei Monate: das Protokoll ist die Reparaturquelle). "Durchsetzen" behält den aktuellen Wert und wendet den Rest des Connector-Schreibvorgangs an.</helpText>
+            <helpText lang="pl-PL">"Tylko loguj" zapisuje każdą niedozwoloną zmianę razem z zastąpioną wartością, ale ją stosuje (użyj najpierw na produkcji, przez miesiąc lub dwa: log jest źródłem naprawy). "Wymuszaj" zachowuje obecną wartość, a resztę zapisu connectora stosuje.</helpText>
+            <options>
+                <option>
+                    <id>log_only</id>
+                    <name>Log only</name>
+                    <name lang="de-DE">Nur protokollieren</name>
+                    <name lang="pl-PL">Tylko loguj</name>
+                </option>
+                <option>
+                    <id>enforce</id>
+                    <name>Enforce</name>
+                    <name lang="de-DE">Durchsetzen</name>
+                    <name lang="pl-PL">Wymuszaj</name>
+                </option>
+            </options>
+            <defaultValue>log_only</defaultValue>
+        </input-field>
+
+        <input-field type="text">
+            <name>allowedFields</name>
+            <label>Allowed customer columns</label>
+            <label lang="de-DE">Freigegebene Kundenspalten</label>
+            <label lang="pl-PL">Dozwolone kolumny klienta</label>
+            <helpText>Comma-separated storage column names of the customer table the connector MAY change on existing customers. "customer_group_id" is always allowed. Columns handled by the guards above (customer_number, email, first_name, last_name) keep their own rules.</helpText>
+            <helpText lang="de-DE">Kommagetrennte Spaltennamen der Kundentabelle, die der Connector bei bestehenden Kunden ändern DARF. "customer_group_id" ist immer freigegeben. Spalten der Schutzfunktionen oben (customer_number, email, first_name, last_name) behalten deren Regeln.</helpText>
+            <helpText lang="pl-PL">Nazwy kolumn tabeli klienta (po przecinku), które connector MOŻE zmieniać u istniejących klientów. "customer_group_id" jest dozwolone zawsze. Kolumny obsługiwane przez ochrony powyżej (customer_number, email, first_name, last_name) zachowują własne reguły.</helpText>
+            <placeholder>customer_group_id</placeholder>
+            <defaultValue>customer_group_id</defaultValue>
+        </input-field>
+
+        <input-field type="text">
+            <name>allowedCustomFields</name>
+            <label>Allowed customer custom-field keys</label>
+            <label lang="de-DE">Freigegebene Zusatzfeld-Schlüssel des Kunden</label>
+            <label lang="pl-PL">Dozwolone klucze pól dodatkowych klienta</label>
+            <helpText>Comma-separated custom field keys the connector may write on existing customers. Default: the two JTL-Wawi note fields. Enter "none" to allow no key at all.</helpText>
+            <helpText lang="de-DE">Kommagetrennte Zusatzfeld-Schlüssel, die der Connector bei bestehenden Kunden schreiben darf. Standard: die beiden JTL-Wawi-Bemerkungsfelder. "none" eingeben, um keinen Schlüssel freizugeben.</helpText>
+            <helpText lang="pl-PL">Klucze pól dodatkowych (po przecinku), które connector może zapisywać u istniejących klientów. Domyślnie: dwa pola uwag z JTL-Wawi. Wpisz "none", aby nie dopuścić żadnego klucza.</helpText>
+            <placeholder>anmerkung,hinweis_(intern)</placeholder>
+            <defaultValue>anmerkung,hinweis_(intern)</defaultValue>
+        </input-field>
+
+        <input-field type="single-select">
+            <name>addressCreateDeletePolicy</name>
+            <label>Address create / delete by the connector</label>
+            <label lang="de-DE">Adresse anlegen / löschen durch den Connector</label>
+            <label lang="pl-PL">Dodanie / usunięcie adresu przez connector</label>
+            <helpText>A new or deleted address of an EXISTING customer cannot be dropped from the connector's write. "Record" lets it happen and logs every column (default). "Reject write" (enforce only) fails the whole connector write, i.e. every customer in that sync batch. Use only after the log shows it actually happens.</helpText>
+            <helpText lang="de-DE">Eine neue oder gelöschte Adresse eines BESTEHENDEN Kunden kann nicht aus dem Schreibvorgang des Connectors entfernt werden. "Protokollieren" lässt es zu und protokolliert jede Spalte (Standard). "Schreibvorgang ablehnen" (nur Durchsetzen) lässt den gesamten Connector-Schreibvorgang scheitern, also jeden Kunden dieses Sync-Pakets. Erst verwenden, wenn das Protokoll zeigt, dass es wirklich vorkommt.</helpText>
+            <helpText lang="pl-PL">Nowego lub usuniętego adresu ISTNIEJĄCEGO klienta nie da się usunąć z zapisu connectora. "Zapisz w logu" pozwala na to i loguje każdą kolumnę (domyślnie). "Odrzuć zapis" (tylko w trybie Wymuszaj) odrzuca cały zapis connectora, czyli każdego klienta z tej paczki synchronizacji. Używaj dopiero, gdy log pokaże, że to naprawdę się zdarza.</helpText>
+            <options>
+                <option>
+                    <id>log</id>
+                    <name>Record</name>
+                    <name lang="de-DE">Protokollieren</name>
+                    <name lang="pl-PL">Zapisz w logu</name>
+                </option>
+                <option>
+                    <id>reject_write</id>
+                    <name>Reject write</name>
+                    <name lang="de-DE">Schreibvorgang ablehnen</name>
+                    <name lang="pl-PL">Odrzuć zapis</name>
+                </option>
+            </options>
+            <defaultValue>log</defaultValue>
+        </input-field>
+    </card>
 </config>

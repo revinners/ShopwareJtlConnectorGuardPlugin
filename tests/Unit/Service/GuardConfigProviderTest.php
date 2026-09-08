@@ -6,6 +6,7 @@ namespace Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Service;
 
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\IdentityGuardConfig;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
@@ -83,7 +84,7 @@ final class GuardConfigProviderTest extends TestCase
 
     public function testLoadIsMemoisedPerSalesChannel(): void
     {
-        $this->systemConfig->expects(self::exactly(16))->method('get')->willReturn(null); // 8 keys x 2 channels
+        $this->systemConfig->expects(self::exactly(26))->method('get')->willReturn(null); // 13 keys x 2 channels
 
         $provider = new GuardConfigProvider($this->systemConfig);
         $provider->load(null);
@@ -94,7 +95,7 @@ final class GuardConfigProviderTest extends TestCase
 
     public function testResetClearsTheMemo(): void
     {
-        $this->systemConfig->expects(self::exactly(16))->method('get')->willReturn(null); // 8 keys x 2 channels
+        $this->systemConfig->expects(self::exactly(26))->method('get')->willReturn(null); // 13 keys x 2 channels
 
         $provider = new GuardConfigProvider($this->systemConfig);
         $provider->load(null);
@@ -140,5 +141,64 @@ final class GuardConfigProviderTest extends TestCase
 
         self::assertFalse($identity->enforce);
         self::assertSame(IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP, $identity->protectName);
+    }
+
+    public function testFieldGuardDefaultsWhenNothingIsConfigured(): void
+    {
+        $fieldGuard = $this->providerWith([])->load()->fieldGuard;
+
+        self::assertTrue($fieldGuard->enabled);
+        self::assertFalse($fieldGuard->enforce, 'field guard ships in log_only');
+        self::assertSame(['customer_group_id'], $fieldGuard->allowedFields);
+        self::assertSame(['anmerkung', 'hinweis_(intern)'], $fieldGuard->allowedCustomFields, 'the two Wawi note keys (spec open question 2)');
+        self::assertSame(FieldGuardConfig::POLICY_LOG, $fieldGuard->addressCreateDeletePolicy);
+    }
+
+    public function testFieldGuardParsesConfiguredValues(): void
+    {
+        $fieldGuard = $this->providerWith([
+            'fieldGuardEnabled' => false,
+            'fieldGuardMode' => 'enforce',
+            'allowedFields' => ' vat_ids , customer_group_id ,, account_type',
+            'allowedCustomFields' => "anmerkung,\n custom_marker ",
+            'addressCreateDeletePolicy' => 'reject_write',
+        ])->load('sc-1')->fieldGuard;
+
+        self::assertFalse($fieldGuard->enabled);
+        self::assertTrue($fieldGuard->enforce);
+        self::assertSame(['customer_group_id', 'vat_ids', 'account_type'], $fieldGuard->allowedFields);
+        self::assertSame(['anmerkung', 'custom_marker'], $fieldGuard->allowedCustomFields);
+        self::assertSame(FieldGuardConfig::POLICY_REJECT_WRITE, $fieldGuard->addressCreateDeletePolicy);
+    }
+
+    public function testCustomerGroupIsAlwaysAllowed(): void
+    {
+        $fieldGuard = $this->providerWith(['allowedFields' => 'title'])->load()->fieldGuard;
+
+        self::assertSame(['customer_group_id', 'title'], $fieldGuard->allowedFields);
+    }
+
+    public function testAllowedCustomFieldsNoneMeansNoKeyAllowed(): void
+    {
+        self::assertSame([], $this->providerWith(['allowedCustomFields' => ' NONE '])->load()->fieldGuard->allowedCustomFields);
+        self::assertSame([], $this->providerWith(['allowedCustomFields' => 'none'])->load()->fieldGuard->allowedCustomFields);
+    }
+
+    public function testUnknownFieldGuardValuesFallBackToDefaults(): void
+    {
+        $fieldGuard = $this->providerWith(['fieldGuardMode' => 'yolo', 'addressCreateDeletePolicy' => 'explode'])->load()->fieldGuard;
+
+        self::assertFalse($fieldGuard->enforce);
+        self::assertSame(FieldGuardConfig::POLICY_LOG, $fieldGuard->addressCreateDeletePolicy);
+    }
+
+    public function testFieldGuardIsIndependentOfTheOtherGuards(): void
+    {
+        $config = $this->providerWith(['enabled' => false, 'identityGuardEnabled' => false, 'fieldGuardMode' => 'enforce'])->load();
+
+        self::assertFalse($config->enabled);
+        self::assertFalse($config->identity->enabled);
+        self::assertTrue($config->fieldGuard->enabled);
+        self::assertTrue($config->fieldGuard->enforce);
     }
 }
