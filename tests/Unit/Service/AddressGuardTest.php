@@ -1,0 +1,335 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Service;
+
+use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\AddressGuard;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSource;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerAddressState;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerAddressStateLoader;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerState;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuardConfig;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfig;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogEntry;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\IdentityGuardConfig;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Subscriber\CustomerAddressTestDefinition;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Subscriber\CustomerTestDefinition;
+use Shopware\Core\Framework\Api\Context\AdminApiSource;
+use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityDefinition;
+use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWriteEvent;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\DeleteCommand;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\InsertCommand;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\JsonUpdateCommand;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\UpdateCommand;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\WriteCommand;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\EntityExistence;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\EntityWriteGatewayInterface;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\WriteContext;
+use Shopware\Core\Framework\Uuid\Uuid;
+use Shopware\Core\Framework\Validation\WriteConstraintViolationException;
+use Shopware\Core\Test\Stub\DataAbstractionLayer\StaticDefinitionInstanceRegistry;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
+
+final class AddressGuardTest extends TestCase
+{
+    private const INTEGRATION_ID = '2103c0f8ba934cbdb291287aaa3b5ce8';
+
+    private EntityDefinition $definition;
+    private GuardConfigProvider&MockObject $configProvider;
+    private CustomerAddressStateLoader&MockObject $addressLoader;
+    private CustomerStateLoader&MockObject $customerLoader;
+    private GuardLogger&MockObject $guardLogger;
+    private AddressGuard $guard;
+    private ConnectorSource $connector;
+    /** @var list<array{string, string, string|null, string|null, string, string|null}> action, field, current, attempted, entity, entityId */
+    private array $logged = [];
+
+    protected function setUp(): void
+    {
+        $registry = new StaticDefinitionInstanceRegistry(
+            [CustomerTestDefinition::class, CustomerAddressTestDefinition::class],
+            $this->createMock(ValidatorInterface::class),
+            $this->createMock(EntityWriteGatewayInterface::class),
+        );
+        $this->definition = $registry->getByEntityName('customer_address');
+        $this->configProvider = $this->createMock(GuardConfigProvider::class);
+        $this->addressLoader = $this->createMock(CustomerAddressStateLoader::class);
+        $this->customerLoader = $this->createMock(CustomerStateLoader::class);
+        $this->guardLogger = $this->createMock(GuardLogger::class);
+        $this->guardLogger->method('log')->willReturnCallback(function (GuardLogEntry $e): void {
+            $this->logged[] = [$e->action, $e->field, $e->currentValue, $e->attemptedValue, $e->entity, $e->entityId];
+        });
+        $this->guard = new AddressGuard(
+            $this->configProvider,
+            $this->addressLoader,
+            $this->customerLoader,
+            $this->guardLogger,
+            $this->createMock(LoggerInterface::class),
+            $this->createMock(LoggerInterface::class),
+        );
+        $this->connector = new ConnectorSource(self::INTEGRATION_ID, 'JTL-Connector');
+    }
+
+    private function config(bool $enforce, string $policy = FieldGuardConfig::POLICY_LOG, bool $enabled = true): GuardConfig
+    {
+        return new GuardConfig(true, true, ['JTL-Connector'], [], ['customer_number'], IdentityGuardConfig::disabled(),
+            new FieldGuardConfig($enabled, $enforce, ['customer_group_id'], [], $policy));
+    }
+
+    private function existence(string $idHex, bool $exists): EntityExistence
+    {
+        return new EntityExistence('customer_address', ['id' => $idHex], $exists, false, false, []);
+    }
+
+    private function update(string $idHex, array $payload): UpdateCommand
+    {
+        return new UpdateCommand($this->definition, $payload, ['id' => Uuid::fromHexToBytes($idHex)], $this->existence($idHex, true), '/0/addresses/0');
+    }
+
+    private function jsonUpdate(string $idHex, array $payload): JsonUpdateCommand
+    {
+        return new JsonUpdateCommand($this->definition, 'custom_fields', $payload, ['id' => Uuid::fromHexToBytes($idHex)], $this->existence($idHex, true), '/0/addresses/0');
+    }
+
+    private function insert(string $idHex, array $payload): InsertCommand
+    {
+        $pk = ['id' => Uuid::fromHexToBytes($idHex)];
+
+        return new InsertCommand($this->definition, $pk + $payload, $pk, EntityExistence::createForEntity('customer_address', ['id' => $idHex]), '/0/addresses/0');
+    }
+
+    private function delete(string $idHex): DeleteCommand
+    {
+        return new DeleteCommand($this->definition, ['id' => Uuid::fromHexToBytes($idHex)], $this->existence($idHex, true));
+    }
+
+    /**
+     * @param list<WriteCommand> $commands
+     */
+    private function event(array $commands): EntityWriteEvent
+    {
+        $context = Context::createDefaultContext(new AdminApiSource(null, self::INTEGRATION_ID));
+
+        return EntityWriteEvent::create(WriteContext::createFromContext($context), $commands);
+    }
+
+    private function customer(string $idHex): CustomerState
+    {
+        return new CustomerState($idHex, [
+            'id' => Uuid::fromHexToBytes($idHex),
+            'email' => 'reischl@t-online.de',
+            'first_name' => 'Martin',
+            'last_name' => 'Reischl',
+            'sales_channel_id' => Uuid::fromHexToBytes('019b02dbf154717c8d127b5df75c3b7d'),
+        ]);
+    }
+
+    private function address(string $idHex, string $customerHex, array $extra = []): CustomerAddressState
+    {
+        return new CustomerAddressState($idHex, $extra + [
+            'id' => Uuid::fromHexToBytes($idHex),
+            'customer_id' => Uuid::fromHexToBytes($customerHex),
+            'street' => 'Nelkenweg 12',
+            'zipcode' => '63814',
+            'city' => 'Mainaschaff',
+            'custom_fields' => null,
+            'created_at' => '2026-01-20 16:47:12.680',
+            'updated_at' => null,
+        ]);
+    }
+
+    public function testEnforceRevertsEveryChangedAddressColumn(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->with('019b02dbf154717c8d127b5df75c3b7d')->willReturn($this->config(enforce: true));
+        $this->addressLoader->method('load')->with([Uuid::fromHexToBytes($address)])->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->with([Uuid::fromHexToBytes($customer)])->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->update($address, ['street' => 'Grasiger Weg 20', 'zipcode' => '93333', 'city' => 'Mainaschaff', 'updated_at' => '2026-09-08 10:00:00.000']);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+
+        self::assertSame('Nelkenweg 12', $cmd->getPayload()['street']);
+        self::assertSame('63814', $cmd->getPayload()['zipcode']);
+        self::assertSame('2026-09-08 10:00:00.000', $cmd->getPayload()['updated_at'], 'bookkeeping untouched');
+        self::assertSame([
+            [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'street', 'Nelkenweg 12', 'Grasiger Weg 20', 'customer_address', $address],
+            [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'zipcode', '63814', '93333', 'customer_address', $address],
+        ], $this->logged);
+    }
+
+    public function testLogOnlyRecordsAndAppliesAddressUpdate(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->update($address, ['street' => 'Grasiger Weg 20']);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+
+        self::assertSame('Grasiger Weg 20', $cmd->getPayload()['street']);
+        self::assertSame([[GuardLogEntry::ACTION_OBSERVED_ADDRESS, 'street', 'Nelkenweg 12', 'Grasiger Weg 20', 'customer_address', $address]], $this->logged);
+    }
+
+    public function testAddressCustomFieldsHaveNoAllowList(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer, ['custom_fields' => '{"anmerkung":"alt"}'])]);
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->jsonUpdate($address, ['anmerkung' => 'neu', 'other' => 'x']);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+
+        self::assertSame('alt', $cmd->getPayload()['anmerkung']);
+        self::assertNull($cmd->getPayload()['other']);
+        self::assertSame([
+            [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'custom_fields.anmerkung', 'alt', 'neu', 'customer_address', $address],
+            [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'custom_fields.other', null, 'x', 'customer_address', $address],
+        ], $this->logged);
+    }
+
+    public function testInsertForACustomerInsertedInTheSameWriteIsIgnored(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->expects(self::never())->method('load');
+        $this->customerLoader->method('load')->willReturn([]);
+
+        $cmd = $this->insert($address, ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Neu 1']);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [$customer], [], $this->connector);
+
+        self::assertSame([], $this->logged);
+    }
+
+    public function testInsertForAnExistingCustomerIsRecordedPerColumn(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->customerLoader->method('load')->with([Uuid::fromHexToBytes($customer)])->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->insert($address, ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Grasiger Weg 20', 'city' => 'Neustadt', 'created_at' => '2026-09-08 10:00:00.000']);
+        $event = $this->event([$cmd]);
+        $this->guard->guard($event, [$cmd], [], [], $this->connector);
+
+        self::assertSame('Grasiger Weg 20', $cmd->getPayload()['street'], 'cannot be blocked');
+        self::assertSame([], $event->getWriteContext()->getExceptions()->getExceptions());
+        self::assertSame([
+            [GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE, 'customer_id', null, $customer, 'customer_address', $address],
+            [GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE, 'street', null, 'Grasiger Weg 20', 'customer_address', $address],
+            [GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE, 'city', null, 'Neustadt', 'customer_address', $address],
+        ], $this->logged, 'id and created_at are bookkeeping');
+    }
+
+    public function testDeleteIsRecordedPerColumnFromTheCurrentRow(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->delete($address);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+
+        self::assertSame([
+            [GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE, 'customer_id', $customer, null, 'customer_address', $address],
+            [GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE, 'street', 'Nelkenweg 12', null, 'customer_address', $address],
+            [GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE, 'zipcode', '63814', null, 'customer_address', $address],
+            [GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE, 'city', 'Mainaschaff', null, 'customer_address', $address],
+        ], $this->logged, 'null custom_fields and bookkeeping columns are not logged');
+    }
+
+    public function testDeleteOfAnAddressWhoseCustomerIsDeletedInTheSameWriteIsIgnored(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+        $this->configProvider->expects(self::never())->method('load');
+
+        $cmd = $this->delete($address);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [$customer], $this->connector);
+
+        self::assertSame([], $this->logged);
+    }
+
+    public function testRejectWritePolicyAddsAViolationToTheWriteContext(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, policy: FieldGuardConfig::POLICY_REJECT_WRITE));
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->insert($address, ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Grasiger Weg 20']);
+        $event = $this->event([$cmd]);
+        $this->guard->guard($event, [$cmd], [], [], $this->connector);
+
+        $exceptions = $event->getWriteContext()->getExceptions()->getExceptions();
+        self::assertCount(1, $exceptions);
+        self::assertInstanceOf(WriteConstraintViolationException::class, $exceptions[0]);
+        self::assertSame('/0/addresses/0', $exceptions[0]->getPath());
+        self::assertSame([[GuardLogEntry::ACTION_REJECTED_WRITE, '*', null, null, 'customer_address', $address]], $this->logged);
+    }
+
+    public function testRejectWritePolicyIsInertInLogOnly(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false, policy: FieldGuardConfig::POLICY_REJECT_WRITE));
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->insert($address, ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Grasiger Weg 20']);
+        $event = $this->event([$cmd]);
+        $this->guard->guard($event, [$cmd], [], [], $this->connector);
+
+        self::assertSame([], $event->getWriteContext()->getExceptions()->getExceptions());
+        self::assertSame(GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE, $this->logged[0][0]);
+    }
+
+    public function testDisabledPerSalesChannelDoesNothing(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, enabled: false));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->update($address, ['street' => 'Grasiger Weg 20']);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+
+        self::assertSame('Grasiger Weg 20', $cmd->getPayload()['street']);
+        self::assertSame([], $this->logged);
+    }
+
+    public function testOneFailingCommandDoesNotStopTheOthers(): void
+    {
+        $customer = Uuid::randomHex();
+        $bad = Uuid::randomHex();
+        $good = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->addressLoader->method('load')->willReturn([
+            $bad => new CustomerAddressState($bad, ['id' => Uuid::fromHexToBytes($bad), 'customer_id' => Uuid::fromHexToBytes($customer), 'street' => new \stdClass()]),
+            $good => $this->address($good, $customer),
+        ]);
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $badCmd = $this->update($bad, ['street' => 'x']);
+        $goodCmd = $this->update($good, ['street' => 'Grasiger Weg 20']);
+        $this->guard->guard($this->event([$badCmd, $goodCmd]), [$badCmd, $goodCmd], [], [], $this->connector);
+
+        self::assertSame('Nelkenweg 12', $goodCmd->getPayload()['street'], 'guarded despite the earlier failure');
+    }
+}
