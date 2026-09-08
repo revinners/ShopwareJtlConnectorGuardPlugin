@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogEntry;
@@ -265,5 +266,139 @@ final class GuardLoggerTest extends TestCase
 
         (new GuardLogger($this->createMock(LoggerInterface::class), $this->createMock(LoggerInterface::class), $connection))
             ->log($this->identityEntry(GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'log_only'));
+    }
+
+    public function testAddressRowCarriesEntityAndEntityIdAndTruncatesLongValues(): void
+    {
+        $addressId = Uuid::randomHex();
+        $long = str_repeat('x', 300);
+        $entry = new GuardLogEntry(
+            action: GuardLogEntry::ACTION_BLOCKED_ADDRESS,
+            mode: 'enforce',
+            field: 'street',
+            customerId: '019df771764772929f1136e52180ccf6',
+            email: 'erdoesi@example.com',
+            firstName: 'Adam',
+            lastName: 'Erdösi',
+            currentValue: 'Nelkenweg 12',
+            attemptedValue: $long,
+            assignedValue: null,
+            integrationId: '2103c0f8ba934cbdb291287aaa3b5ce8',
+            integrationLabel: 'JTL-Connector',
+            salesChannelId: null,
+            entity: GuardLogEntry::ENTITY_CUSTOMER_ADDRESS,
+            entityId: $addressId,
+        );
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info')->with(
+            self::logicalAnd(
+                self::stringContains('blocked_address'),
+                self::stringContains('customer_address ' . $addressId . '.street'),
+                self::stringContains('kept "Nelkenweg 12"'),
+                self::stringContains($long),
+            ),
+            self::callback(static fn (array $ctx): bool => $ctx['entity'] === 'customer_address' && $ctx['entityId'] === $addressId && $ctx['attemptedValue'] === $long)
+        );
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('insert')->with(
+            'revinners_jtl_guard_log',
+            self::callback(static function (array $row) use ($addressId): bool {
+                return $row['entity'] === 'customer_address'
+                    && $row['entity_id'] === Uuid::fromHexToBytes($addressId)
+                    && $row['field'] === 'street'
+                    && mb_strlen($row['attempted_value']) === 255
+                    && str_ends_with($row['attempted_value'], '…')
+                    && $row['current_value'] === 'Nelkenweg 12';
+            })
+        );
+
+        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $connection))->log($entry);
+    }
+
+    /**
+     * F1 regression: `field` is VARCHAR(64); a long custom-field key (`custom_fields.<key>`) was
+     * inserted untruncated and would fail the DB write once it exceeded the column width.
+     */
+    public function testFieldColumnIsTruncatedToItsOwnWidth(): void
+    {
+        $longField = 'custom_fields.' . str_repeat('x', 90);
+        $entry = new GuardLogEntry(
+            action: GuardLogEntry::ACTION_BLOCKED_FIELD,
+            mode: 'enforce',
+            field: $longField,
+            customerId: '019df771764772929f1136e52180ccf6',
+            email: 'erdoesi@example.com',
+            firstName: 'Adam',
+            lastName: 'Erdösi',
+            currentValue: 'a',
+            attemptedValue: 'b',
+            assignedValue: null,
+            integrationId: '2103c0f8ba934cbdb291287aaa3b5ce8',
+            integrationLabel: 'JTL-Connector',
+            salesChannelId: null,
+        );
+
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('insert')->with(
+            'revinners_jtl_guard_log',
+            self::callback(static function (array $row): bool {
+                return mb_strlen($row['field']) === 64 && str_ends_with($row['field'], '…');
+            })
+        );
+
+        (new GuardLogger($this->createMock(LoggerInterface::class), $this->createMock(LoggerInterface::class), $connection))->log($entry);
+    }
+
+    public function testCustomerRowDefaultsEntityToCustomerWithoutEntityId(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('insert')->with(
+            'revinners_jtl_guard_log',
+            self::callback(static fn (array $row): bool => $row['entity'] === 'customer' && $row['entity_id'] === null)
+        );
+
+        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $connection))->log($this->entry());
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function fieldGuardMessages(): iterable
+    {
+        yield 'blocked_field' => [GuardLogEntry::ACTION_BLOCKED_FIELD, 'enforce', 'kept "Nelkenweg 12", connector sent "Grasiger Weg 20" (field guard)'];
+        yield 'observed_field' => [GuardLogEntry::ACTION_OBSERVED_FIELD, 'log_only', 'connector sent "Grasiger Weg 20" over "Nelkenweg 12" and it was applied (field guard, observed only)'];
+        yield 'blocked_address' => [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'enforce', 'kept "Nelkenweg 12", connector sent "Grasiger Weg 20" (field guard)'];
+        yield 'observed_address' => [GuardLogEntry::ACTION_OBSERVED_ADDRESS, 'log_only', 'connector sent "Grasiger Weg 20" over "Nelkenweg 12" and it was applied (field guard, observed only)'];
+        yield 'observed_address_create' => [GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE, 'enforce', 'connector created it with "Grasiger Weg 20" (cannot be blocked, recorded)'];
+        yield 'observed_address_delete' => [GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE, 'enforce', 'connector deleted it, had "Nelkenweg 12" (cannot be blocked, recorded)'];
+        yield 'rejected_write' => [GuardLogEntry::ACTION_REJECTED_WRITE, 'enforce', 'whole connector write rejected (policy reject_write)'];
+    }
+
+    #[DataProvider('fieldGuardMessages')]
+    public function testFieldGuardMessages(string $action, string $mode, string $expected): void
+    {
+        $entry = new GuardLogEntry(
+            action: $action,
+            mode: $mode,
+            field: 'street',
+            customerId: '019df771764772929f1136e52180ccf6',
+            email: 'erdoesi@example.com',
+            firstName: 'Adam',
+            lastName: 'Erdösi',
+            currentValue: 'Nelkenweg 12',
+            attemptedValue: 'Grasiger Weg 20',
+            assignedValue: null,
+            integrationId: '2103c0f8ba934cbdb291287aaa3b5ce8',
+            integrationLabel: 'JTL-Connector',
+            salesChannelId: null,
+            entity: GuardLogEntry::ENTITY_CUSTOMER_ADDRESS,
+            entityId: 'a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4',
+        );
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('info')->with(self::stringContains($expected), self::anything());
+
+        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $this->createMock(Connection::class)))->log($entry);
     }
 }

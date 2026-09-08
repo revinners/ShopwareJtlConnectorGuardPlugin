@@ -13,6 +13,8 @@ use Shopware\Core\Framework\Uuid\Uuid;
 /**
  * Records every intervention twice: on the `jtl_connector_guard` Monolog channel and in the
  * `revinners_jtl_guard_log` table (plain DBAL insert — no DAL write from inside a write event).
+ * The DB sink truncates `current_value` / `attempted_value` / `assigned_value` to 255 characters
+ * (the column width); the channel log line always carries the full, untruncated value.
  * Logging must never break the customer write: neither sink (the channel logger or the DB
  * insert) is allowed to throw out of log(). If the channel logger itself is broken (e.g. its
  * StreamHandler cannot open `var/log/jtl_connector_guard_<env>.log`), we report on the
@@ -43,13 +45,15 @@ final class GuardLogger
             $this->connection->insert(ShopwareJtlConnectorGuardPlugin::LOG_TABLE, [
                 'id' => Uuid::randomBytes(),
                 'customer_id' => $entry->customerId !== null ? Uuid::fromHexToBytes($entry->customerId) : null,
+                'entity' => $entry->entity,
+                'entity_id' => $entry->entityId !== null ? Uuid::fromHexToBytes($entry->entityId) : null,
                 'email' => $entry->email,
                 'first_name' => $entry->firstName,
                 'last_name' => $entry->lastName,
-                'field' => $entry->field,
-                'current_value' => $entry->currentValue,
-                'attempted_value' => $entry->attemptedValue,
-                'assigned_value' => $entry->assignedValue,
+                'field' => self::truncate($entry->field, 64),
+                'current_value' => self::truncate($entry->currentValue),
+                'attempted_value' => self::truncate($entry->attemptedValue),
+                'assigned_value' => self::truncate($entry->assignedValue),
                 'action' => $entry->action,
                 'mode' => $entry->mode,
                 'integration_id' => Uuid::fromHexToBytes($entry->integrationId),
@@ -85,6 +89,20 @@ final class GuardLogger
     }
 
     /**
+     * The table columns are VARCHAR(255) by default (`field` is VARCHAR(64), passed via $max);
+     * JSON values (custom_fields, vat_ids) can be longer. Only the DB sink is truncated — the
+     * channel log line above carries the full value.
+     */
+    private static function truncate(?string $value, int $max = 255): ?string
+    {
+        if ($value === null || mb_strlen($value) <= $max) {
+            return $value;
+        }
+
+        return mb_substr($value, 0, $max - 1) . '…';
+    }
+
+    /**
      * The message states what actually happened, which differs per mode: in `log_only` the
      * connector's value IS applied, so the line must not claim the old value was kept.
      * Identity actions carry their outcome in the action itself (`blocked_*` = kept,
@@ -99,7 +117,7 @@ final class GuardLogger
             $entry->customerId ?? 'new',
             $entry->email ?? '-',
             trim(($entry->firstName ?? '') . ' ' . ($entry->lastName ?? '')),
-            $entry->field,
+            $this->fieldLabel($entry),
             match ($entry->action) {
                 GuardLogEntry::ACTION_REMAPPED_CREATE => $this->createOutcome($entry),
                 GuardLogEntry::ACTION_BLOCKED_IDENTITY => sprintf(
@@ -112,11 +130,45 @@ final class GuardLogger
                     $entry->attemptedValue ?? '',
                     $entry->currentValue ?? '',
                 ),
+                GuardLogEntry::ACTION_BLOCKED_FIELD,
+                GuardLogEntry::ACTION_BLOCKED_ADDRESS => sprintf(
+                    'kept "%s", connector sent "%s" (field guard)',
+                    $entry->currentValue ?? '',
+                    $entry->attemptedValue ?? '',
+                ),
+                GuardLogEntry::ACTION_OBSERVED_FIELD,
+                GuardLogEntry::ACTION_OBSERVED_ADDRESS => sprintf(
+                    'connector sent "%s" over "%s" and it was applied (field guard, observed only)',
+                    $entry->attemptedValue ?? '',
+                    $entry->currentValue ?? '',
+                ),
+                GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE => sprintf(
+                    'connector created it with "%s" (cannot be blocked, recorded)',
+                    $entry->attemptedValue ?? '',
+                ),
+                GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE => sprintf(
+                    'connector deleted it, had "%s" (cannot be blocked, recorded)',
+                    $entry->currentValue ?? '',
+                ),
+                GuardLogEntry::ACTION_REJECTED_WRITE => 'whole connector write rejected (policy reject_write)',
                 default => $this->updateOutcome($entry),
             },
             $entry->integrationId,
             $entry->integrationLabel ?? '',
         );
+    }
+
+    /**
+     * `street` alone is ambiguous once addresses are logged: prefix non-customer rows with the
+     * entity and its id so a line reads "customer_address <id>.street".
+     */
+    private function fieldLabel(GuardLogEntry $entry): string
+    {
+        if ($entry->entity === GuardLogEntry::ENTITY_CUSTOMER) {
+            return $entry->field;
+        }
+
+        return sprintf('%s %s.%s', $entry->entity, $entry->entityId ?? '?', $entry->field);
     }
 
     private function updateOutcome(GuardLogEntry $entry): string

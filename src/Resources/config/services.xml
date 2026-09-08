@@ -15,6 +15,9 @@
         <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader">
             <argument type="service" id="Doctrine\DBAL\Connection"/>
         </service>
+        <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerAddressStateLoader">
+            <argument type="service" id="Doctrine\DBAL\Connection"/>
+        </service>
 
         <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Core\Content\GuardLog\GuardLogDefinition">
             <tag name="shopware.entity.definition" entity="revinners_jtl_guard_log"/>
@@ -26,12 +29,27 @@
             <argument type="service" id="Doctrine\DBAL\Connection"/>
         </service>
 
+        <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuard">
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger"/>
+        </service>
+
+        <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\AddressGuard">
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider"/>
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerAddressStateLoader"/>
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader"/>
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger"/>
+            <argument type="service" id="monolog.logger.jtl_connector_guard"/>
+            <argument type="service" id="logger"/>
+        </service>
+
         <service id="Revinners\ShopwareJtlConnectorGuardPlugin\Subscriber\CustomerNumberWriteProtection">
             <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider"/>
             <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSourceDetector"/>
             <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader"/>
             <argument type="service" id="Shopware\Core\System\NumberRange\ValueGenerator\NumberRangeValueGeneratorInterface"/>
             <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger"/>
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuard"/>
+            <argument type="service" id="Revinners\ShopwareJtlConnectorGuardPlugin\Service\AddressGuard"/>
             <argument type="service" id="monolog.logger.jtl_connector_guard"/>
             <argument type="service" id="logger"/>
             <tag name="kernel.event_subscriber"/>

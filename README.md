@@ -2,7 +2,7 @@
 
 `revinners/shopware6-jtl-connector-guard` — a container plugin for every fix we apply on top of the
 JTL-Connector (JTL-Wawi → Shopware). Shops: **yam-shop.de**, **ducati-world24.com** (Shopware 6.6.10.x).
-Features: **001** customer number write protection (1.0.x), **002** customer identity write protection (1.1.0).
+Features: **001** customer number write protection (1.0.x), **002** customer identity write protection (1.1.0), **003** connector field allow-list (1.2.0).
 
 ## Feature 001 — customer number write protection
 
@@ -83,6 +83,8 @@ else — admin users, storefront, CLI, imports, other integrations — is never 
   line the guard emits falls back to Shopware's main `logger` service if the `jtl_connector_guard`
   channel itself cannot be written (e.g. its log file cannot be opened). No failure of either
   logger can propagate out of `onEntityWrite()` and into the DAL write.
+- Custom-field writes arrive as a separate `JsonUpdateCommand` (payload keyed by custom-field key);
+  001/002 ignore it, 003 guards it per key.
 
 ## Feature 002 — customer identity write protection
 
@@ -121,6 +123,71 @@ damage keeps happening — the connector still overwrites email/name while you o
 this window short; leaving `log_only` on longer does not protect any customer's identity.
 Repairing already-swapped accounts is a separate data job (spec 002, "Out of scope").
 
+## Feature 003 — connector field allow-list (customer + address)
+
+001 and 002 guard four columns. The merchant's actual rule is an allow-list with one entry: on an
+existing customer the JTL-Connector may change **only the customer group**. Feature 003 turns that
+into config (see `specs/feat/003-connector-field-allow-list/SPEC.md`), with its own switches,
+independent of 001 and 002:
+
+- **Customer columns:** every column present in a connector update that is not on `allowedFields`
+  (default `customer_group_id`, always included), not a bookkeeping column (`created_at`,
+  `updated_at`, `created_by_id`, `updated_by_id`, `auto_increment`, `version_id`) and not already
+  owned by 001/002, is kept in `enforce` and recorded with its pre-write value in `log_only`.
+  Actions `blocked_field` / `observed_field`.
+- **Customer custom fields:** the connector owns the `custom_jtl` custom-field set and pushes Wawi's
+  notes `anmerkung` and `hinweis_(intern)`; those two keys are allowed by default
+  (`allowedCustomFields`, enter `none` to allow nothing). Any other key is guarded per key, logged as
+  `custom_fields.<key>`. In `enforce`, a guarded key the customer did not have before is written back
+  as JSON `null` (the DAL cannot remove a key), so `custom_fields` may accrete `"<key>": null`
+  entries; harmless for the admin, which renders null as empty.
+- **Addresses:** an update of an existing customer's address is guarded column by column with no
+  allow-list (`blocked_address` / `observed_address`). A **new or deleted address** of an existing
+  customer cannot be removed from the connector's write by the DAL, so it is recorded one row per
+  column (`observed_address_create` / `observed_address_delete`); the customer's default address ids
+  are customer columns and therefore stay, so a recorded new address never becomes the default.
+  With `addressCreateDeletePolicy=reject_write` **and** `fieldGuardMode=enforce` the whole connector
+  write is rejected instead (`rejected_write`). That fails every customer in the same sync batch, so
+  keep the default `log` unless the log shows creates/deletes actually happening.
+  `fieldGuardEnabled` is read from the global config to decide whether address commands are
+  inspected at all; a shop that disables it globally and re-enables it for one sales channel gets
+  customer-column guarding but no address guarding on that channel.
+- Connector-created customers (and their addresses) are not affected. Admin, storefront, CLI and
+  other-integration writes are never touched.
+- Audit rows for addresses carry `entity = customer_address` and `entity_id` (the address id);
+  customer rows carry `entity = customer`. Values longer than 255 characters are truncated in the
+  table only; the channel log line keeps the full value.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fieldGuardEnabled` | `true` | master switch of feature 003 |
+| `fieldGuardMode` | `log_only` | `log_only` = record and apply; `enforce` = keep current values |
+| `allowedFields` | `customer_group_id` | customer columns the connector may change (group always included) |
+| `allowedCustomFields` | `anmerkung,hinweis_(intern)` | customer custom-field keys the connector may write; `none` = no key |
+| `addressCreateDeletePolicy` | `log` | `log` = record a new/deleted address; `reject_write` = fail the whole write (enforce only) |
+
+**Precedence:** 001 → 002 → 003. A column 001 lists in `protectedFields` is handled by 001 only.
+`email`, `first_name`, `last_name` are handled by 002 only while `identityGuardEnabled` is on — so
+to have names kept under the allow-list, set `identityGuardProtectName` to `always`; with the
+identity guard disabled those three columns fall to 003 like any other column. With the identity
+guard enabled and `identityGuardProtectName=off`, a connector name change is neither kept nor
+recorded by any guard (002 skips it by policy and 003 leaves the identity columns to 002); use
+`always` under the allow-list.
+
+**Rollout:** the point of this feature is the observation window. Deploy in `log_only` for one or
+two months: every `observed_*` row holds the value the connector replaced, keyed by customer and
+column, which is the data needed to restore those accounts afterwards (repair is a separate job,
+see spec "Out of scope"). Then switch `fieldGuardMode` to `enforce`. As with 001/002, in `log_only`
+the damage keeps happening while you observe. A `rejected_write` DB row can be rolled back together
+with the write it rejected; the channel file line is the reliable record for that action. Before
+`enforce` on ducati-world24.com, run the custom-fields pre-check SQL from the spec there too.
+
+**Upgrading an installed plugin in place:** replace the files, then `bin/console cache:clear` →
+`plugin:refresh` → `plugin:update ShopwareJtlConnectorGuardPlugin` → `cache:clear`. Running
+`plugin:refresh` against a warm container compiled from the previous version fails with a
+constructor TypeError (`Argument #6 ($fieldGuard) must be of type FieldGuard`) and, on production,
+breaks every customer write until the cache is cleared.
+
 ## Development
 
 ```bash
@@ -132,3 +199,8 @@ Unit tests mock the plugin's `final` services, so `dg/bypass-finals` is enabled 
 
 Local shop integration: copy the plugin into `custom/plugins/ShopwareJtlConnectorGuardPlugin` of the
 shop checkout, then `bin/console plugin:refresh && bin/console plugin:install --activate ShopwareJtlConnectorGuardPlugin`.
+**Upgrading an installed plugin in place:** replace the files, then `bin/console cache:clear` →
+`plugin:refresh` → `plugin:update ShopwareJtlConnectorGuardPlugin` → `cache:clear`. Running
+`plugin:refresh` against a warm container compiled from the previous version fails with a
+constructor TypeError (`Argument #6 ($fieldGuard) must be of type FieldGuard`) and, on production,
+breaks every customer write until the cache is cleared.

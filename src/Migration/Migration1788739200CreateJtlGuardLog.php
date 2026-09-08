@@ -26,6 +26,8 @@ class Migration1788739200CreateJtlGuardLog extends MigrationStep
             CREATE TABLE IF NOT EXISTS `revinners_jtl_guard_log` (
                 `id`                BINARY(16)   NOT NULL,
                 `customer_id`       BINARY(16)   NULL,
+                `entity`            VARCHAR(32)  NOT NULL DEFAULT \'customer\',
+                `entity_id`         BINARY(16)   NULL,
                 `email`             VARCHAR(255) NULL,
                 `first_name`        VARCHAR(255) NULL,
                 `last_name`         VARCHAR(255) NULL,
@@ -41,6 +43,7 @@ class Migration1788739200CreateJtlGuardLog extends MigrationStep
                 `created_at`        DATETIME(3)  NOT NULL,
                 PRIMARY KEY (`id`),
                 KEY `idx.revinners_jtl_guard_log.customer_id` (`customer_id`),
+                KEY `idx.revinners_jtl_guard_log.entity_id` (`entity_id`),
                 KEY `idx.revinners_jtl_guard_log.created_at` (`created_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ');

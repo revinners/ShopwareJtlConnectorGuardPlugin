@@ -7,10 +7,13 @@ namespace Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Subscriber;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\AddressGuard;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSource;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\ConnectorSourceDetector;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerState;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuard;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogEntry;
@@ -21,7 +24,9 @@ use Shopware\Core\Framework\Api\Context\AdminApiSource;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityDefinition;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWriteEvent;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\DeleteCommand;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\InsertCommand;
+use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\JsonUpdateCommand;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\UpdateCommand;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\WriteCommand;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\EntityExistence;
@@ -37,11 +42,14 @@ final class CustomerNumberWriteProtectionTest extends TestCase
     private const INTEGRATION_ID = '2103c0f8ba934cbdb291287aaa3b5ce8';
 
     private EntityDefinition $definition;
+    private EntityDefinition $addressDefinition;
     private GuardConfigProvider&MockObject $configProvider;
     private ConnectorSourceDetector&MockObject $detector;
     private CustomerStateLoader&MockObject $stateLoader;
     private NumberRangeValueGeneratorInterface&MockObject $numberRange;
     private GuardLogger&MockObject $guardLogger;
+    private FieldGuard&MockObject $fieldGuard;
+    private AddressGuard&MockObject $addressGuard;
     private LoggerInterface&MockObject $logger;
     private LoggerInterface&MockObject $fallbackLogger;
     private CustomerNumberWriteProtection $subscriber;
@@ -50,17 +58,20 @@ final class CustomerNumberWriteProtectionTest extends TestCase
     protected function setUp(): void
     {
         $registry = new StaticDefinitionInstanceRegistry(
-            [CustomerTestDefinition::class],
+            [CustomerTestDefinition::class, CustomerAddressTestDefinition::class],
             $this->createMock(ValidatorInterface::class),
             $this->createMock(EntityWriteGatewayInterface::class),
         );
         $this->definition = $registry->getByEntityName('customer');
+        $this->addressDefinition = $registry->getByEntityName('customer_address');
 
         $this->configProvider = $this->createMock(GuardConfigProvider::class);
         $this->detector = $this->createMock(ConnectorSourceDetector::class);
         $this->stateLoader = $this->createMock(CustomerStateLoader::class);
         $this->numberRange = $this->createMock(NumberRangeValueGeneratorInterface::class);
         $this->guardLogger = $this->createMock(GuardLogger::class);
+        $this->fieldGuard = $this->createMock(FieldGuard::class);
+        $this->addressGuard = $this->createMock(AddressGuard::class);
         $this->logger = $this->createMock(LoggerInterface::class);
         $this->fallbackLogger = $this->createMock(LoggerInterface::class);
 
@@ -70,6 +81,8 @@ final class CustomerNumberWriteProtectionTest extends TestCase
             $this->stateLoader,
             $this->numberRange,
             $this->guardLogger,
+            $this->fieldGuard,
+            $this->addressGuard,
             $this->logger,
             $this->fallbackLogger,
         );
@@ -79,14 +92,19 @@ final class CustomerNumberWriteProtectionTest extends TestCase
 
     // ---- helpers -----------------------------------------------------------
 
-    private function config(bool $enforce, bool $enabled = true, array $protected = ['customer_number'], ?IdentityGuardConfig $identity = null): GuardConfig
+    private function config(bool $enforce, bool $enabled = true, array $protected = ['customer_number'], ?IdentityGuardConfig $identity = null, ?FieldGuardConfig $fieldGuard = null): GuardConfig
     {
-        return new GuardConfig($enabled, $enforce, ['JTL-Connector'], [], $protected, $identity ?? IdentityGuardConfig::disabled());
+        return new GuardConfig($enabled, $enforce, ['JTL-Connector'], [], $protected, $identity ?? IdentityGuardConfig::disabled(), $fieldGuard ?? FieldGuardConfig::disabled());
     }
 
     private function identity(bool $enforce, string $protectName = IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP, bool $enabled = true): IdentityGuardConfig
     {
         return new IdentityGuardConfig($enabled, $enforce, $protectName);
+    }
+
+    private function fieldGuard(bool $enforce, bool $enabled = true): FieldGuardConfig
+    {
+        return new FieldGuardConfig($enabled, $enforce, ['customer_group_id'], ['anmerkung', 'hinweis_(intern)'], FieldGuardConfig::POLICY_LOG);
     }
 
     private function connectorDetected(): void
@@ -115,6 +133,20 @@ final class CustomerNumberWriteProtectionTest extends TestCase
         $pk = ['id' => Uuid::fromHexToBytes($idHex)];
 
         return new InsertCommand($this->definition, ['id' => $pk['id']] + $payload, $pk, EntityExistence::createForEntity('customer', ['id' => $idHex]), '/0');
+    }
+
+    private function jsonUpdate(string $idHex, array $payload): JsonUpdateCommand
+    {
+        $existence = new EntityExistence('customer', ['id' => $idHex], true, false, false, []);
+
+        return new JsonUpdateCommand($this->definition, 'custom_fields', $payload, ['id' => Uuid::fromHexToBytes($idHex)], $existence, '/0');
+    }
+
+    private function addressUpdate(string $idHex, array $payload): UpdateCommand
+    {
+        $existence = new EntityExistence('customer_address', ['id' => $idHex], true, false, false, []);
+
+        return new UpdateCommand($this->addressDefinition, $payload, ['id' => Uuid::fromHexToBytes($idHex)], $existence, '/0/addresses/0');
     }
 
     /**
@@ -821,7 +853,7 @@ final class CustomerNumberWriteProtectionTest extends TestCase
 
     public function testBothGuardsDisabledSkipDetectionEntirely(): void
     {
-        $this->configProvider->method('load')->willReturn($this->config(enforce: true, enabled: false, identity: $this->identity(enforce: true, enabled: false)));
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, enabled: false, identity: $this->identity(enforce: true, enabled: false), fieldGuard: $this->fieldGuard(enforce: true, enabled: false)));
         $this->detector->expects(self::never())->method('resolve');
         $this->guardLogger->expects(self::never())->method('log');
 
@@ -829,5 +861,113 @@ final class CustomerNumberWriteProtectionTest extends TestCase
         $this->subscriber->onEntityWrite($this->event([$cmd]));
 
         self::assertSame('x@example.com', $cmd->getPayload()['email']);
+    }
+
+    // ---- feature 003 routing -------------------------------------------------
+
+    public function testFieldGuardReceivesTheUpdateWithHandledAndSent(): void
+    {
+        $id = Uuid::randomHex();
+        $state = $this->state($id, 'C10009', Uuid::randomHex());
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, fieldGuard: $this->fieldGuard(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $state]);
+
+        $cmd = $this->update($id, ['customer_number' => '10009', 'title' => 'Dr.']);
+        $this->fieldGuard->expects(self::once())->method('guardCustomerColumns')->with(
+            $cmd,
+            $id,
+            $state,
+            self::anything(),
+            self::isInstanceOf(ConnectorSource::class),
+            ['customer_number'],
+            ['customer_number' => '10009', 'title' => 'Dr.'],
+        );
+        $this->fieldGuard->expects(self::never())->method('guardCustomerCustomFields');
+
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('C10009', $cmd->getPayload()['customer_number'], '001 still reverted before 003 ran, but 003 saw the payload as sent');
+    }
+
+    public function testJsonUpdateIsRoutedToTheCustomFieldGuardAndNotToTheColumnGuards(): void
+    {
+        $id = Uuid::randomHex();
+        $state = $this->state($id, 'C10009', Uuid::randomHex());
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, protected: ['customer_number', 'email'], identity: $this->identity(enforce: true), fieldGuard: $this->fieldGuard(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->with([Uuid::fromHexToBytes($id)])->willReturn([$id => $state]);
+        $this->guardLogger->expects(self::never())->method('log');
+
+        // a custom field that happens to be called "email" must not be mistaken for the email column
+        $cmd = $this->jsonUpdate($id, ['email' => 'not-a-column@example.com']);
+        $this->fieldGuard->expects(self::once())->method('guardCustomerCustomFields')->with($cmd, $id, $state, self::anything(), self::isInstanceOf(ConnectorSource::class));
+        $this->fieldGuard->expects(self::never())->method('guardCustomerColumns');
+
+        $this->subscriber->onEntityWrite($this->event([$cmd]));
+
+        self::assertSame('not-a-column@example.com', $cmd->getPayload()['email']);
+    }
+
+    public function testFieldGuardIsSkippedWhenDisabledForTheSalesChannel(): void
+    {
+        $id = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, fieldGuard: $this->fieldGuard(enforce: true, enabled: false)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$id => $this->state($id, 'C10009', Uuid::randomHex())]);
+        $this->fieldGuard->expects(self::never())->method('guardCustomerColumns');
+        $this->fieldGuard->expects(self::never())->method('guardCustomerCustomFields');
+
+        $this->subscriber->onEntityWrite($this->event([$this->update($id, ['title' => 'Dr.']), $this->jsonUpdate($id, ['x' => 1])]));
+    }
+
+    public function testAddressCommandsGoToTheAddressGuardWithInsertedAndDeletedCustomerIds(): void
+    {
+        $existing = Uuid::randomHex();
+        $created = Uuid::randomHex();
+        $deleted = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false, enabled: false, identity: $this->identity(enforce: false, enabled: false), fieldGuard: $this->fieldGuard(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->method('load')->willReturn([$existing => $this->state($existing, 'C1', Uuid::randomHex())]);
+
+        $addressCmd = $this->addressUpdate($address, ['street' => 'Grasiger Weg 20']);
+        $customerInsert = $this->insert($created, ['customer_number' => '1', 'email' => 'new@example.com']);
+        $customerDelete = new DeleteCommand($this->definition, ['id' => Uuid::fromHexToBytes($deleted)], new EntityExistence('customer', ['id' => $deleted], true, false, false, []));
+        $event = $this->event([$this->update($existing, ['title' => 'x']), $customerInsert, $customerDelete, $addressCmd]);
+
+        $this->addressGuard->expects(self::once())->method('guard')->with($event, [$addressCmd], [$created], [$deleted], self::isInstanceOf(ConnectorSource::class));
+
+        $this->subscriber->onEntityWrite($event);
+    }
+
+    public function testAddressOnlyWriteStillRunsDetection(): void
+    {
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false, enabled: false, identity: $this->identity(enforce: false, enabled: false), fieldGuard: $this->fieldGuard(enforce: true)));
+        $this->connectorDetected();
+        $this->stateLoader->expects(self::never())->method('load');
+
+        $addressCmd = $this->addressUpdate($address, ['street' => 'Grasiger Weg 20']);
+        $this->addressGuard->expects(self::once())->method('guard')->with(self::anything(), [$addressCmd], [], [], self::isInstanceOf(ConnectorSource::class));
+
+        $this->subscriber->onEntityWrite($this->event([$addressCmd]));
+    }
+
+    public function testAddressGuardIsNotCalledWhenTheFieldGuardIsGloballyDisabled(): void
+    {
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, fieldGuard: $this->fieldGuard(enforce: true, enabled: false)));
+        $this->connectorDetected();
+        $this->addressGuard->expects(self::never())->method('guard');
+
+        $this->subscriber->onEntityWrite($this->event([$this->addressUpdate(Uuid::randomHex(), ['street' => 'x'])]));
+    }
+
+    public function testAllThreeGuardsDisabledSkipDetectionEntirely(): void
+    {
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, enabled: false, identity: $this->identity(enforce: true, enabled: false), fieldGuard: $this->fieldGuard(enforce: true, enabled: false)));
+        $this->detector->expects(self::never())->method('resolve');
+
+        $this->subscriber->onEntityWrite($this->event([$this->update(Uuid::randomHex(), ['title' => 'x']), $this->addressUpdate(Uuid::randomHex(), ['street' => 'x'])]));
     }
 }

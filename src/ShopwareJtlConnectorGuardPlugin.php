@@ -12,6 +12,7 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 /**
  * Container plugin for every fix we apply on top of the JTL-Connector (JTL-Wawi -> Shopware).
  * Feature 001: customer number write protection (see specs/feat/001-customer-number-write-protection).
+ * Feature 002: customer identity write protection. Feature 003: connector field allow-list (customer + address).
  */
 class ShopwareJtlConnectorGuardPlugin extends Plugin
 {

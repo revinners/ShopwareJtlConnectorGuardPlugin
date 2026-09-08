@@ -1,7 +1,7 @@
 {
   "name": "revinners/shopware6-jtl-connector-guard",
-  "description": "Guards Shopware data against unwanted overwrites by the JTL-Connector (JTL-Wawi): customer number, e-mail and name write protection.",
-  "version": "1.1.0",
+  "description": "Guards Shopware data against unwanted overwrites by the JTL-Connector (JTL-Wawi): customer number, e-mail and name write protection, plus an allow-list over every other customer and address field.",
+  "version": "1.2.0",
   "type": "shopware-platform-plugin",
   "license": "proprietary",
   "authors": [
@@ -36,9 +36,9 @@
       "pl-PL": "JTL-Connector Guard"
     },
     "description": {
-      "de-DE": "Schützt Shopware-Kundendaten (Kundennummer, E-Mail und Name) vor dem Überschreiben durch den JTL-Connector.",
-      "en-GB": "Protects Shopware customer data (customer number, e-mail and name) from being overwritten by the JTL-Connector.",
-      "pl-PL": "Chroni dane klientów Shopware (numer klienta, e-mail, imię i nazwisko) przed nadpisaniem przez JTL-Connector."
+      "de-DE": "Schützt Shopware-Kundendaten vor dem Überschreiben durch den JTL-Connector: Kundennummer, E-Mail, Name und – per Freigabeliste – alle weiteren Kunden- und Adressfelder.",
+      "en-GB": "Protects Shopware customer data from being overwritten by the JTL-Connector: customer number, e-mail, name and, via an allow-list, every other customer and address field.",
+      "pl-PL": "Chroni dane klientów Shopware przed nadpisaniem przez JTL-Connector: numer klienta, e-mail, nazwisko oraz, przez listę dozwolonych, wszystkie pozostałe pola klienta i adresu."
     }
   },
   "config": {
