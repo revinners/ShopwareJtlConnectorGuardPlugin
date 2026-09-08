@@ -316,6 +316,40 @@ final class GuardLoggerTest extends TestCase
         (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $connection))->log($entry);
     }
 
+    /**
+     * F1 regression: `field` is VARCHAR(64); a long custom-field key (`custom_fields.<key>`) was
+     * inserted untruncated and would fail the DB write once it exceeded the column width.
+     */
+    public function testFieldColumnIsTruncatedToItsOwnWidth(): void
+    {
+        $longField = 'custom_fields.' . str_repeat('x', 90);
+        $entry = new GuardLogEntry(
+            action: GuardLogEntry::ACTION_BLOCKED_FIELD,
+            mode: 'enforce',
+            field: $longField,
+            customerId: '019df771764772929f1136e52180ccf6',
+            email: 'erdoesi@example.com',
+            firstName: 'Adam',
+            lastName: 'Erdösi',
+            currentValue: 'a',
+            attemptedValue: 'b',
+            assignedValue: null,
+            integrationId: '2103c0f8ba934cbdb291287aaa3b5ce8',
+            integrationLabel: 'JTL-Connector',
+            salesChannelId: null,
+        );
+
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('insert')->with(
+            'revinners_jtl_guard_log',
+            self::callback(static function (array $row): bool {
+                return mb_strlen($row['field']) === 64 && str_ends_with($row['field'], '…');
+            })
+        );
+
+        (new GuardLogger($this->createMock(LoggerInterface::class), $this->createMock(LoggerInterface::class), $connection))->log($entry);
+    }
+
     public function testCustomerRowDefaultsEntityToCustomerWithoutEntityId(): void
     {
         $logger = $this->createMock(LoggerInterface::class);

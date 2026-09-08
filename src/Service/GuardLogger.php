@@ -50,7 +50,7 @@ final class GuardLogger
                 'email' => $entry->email,
                 'first_name' => $entry->firstName,
                 'last_name' => $entry->lastName,
-                'field' => $entry->field,
+                'field' => self::truncate($entry->field, 64),
                 'current_value' => self::truncate($entry->currentValue),
                 'attempted_value' => self::truncate($entry->attemptedValue),
                 'assigned_value' => self::truncate($entry->assignedValue),
@@ -89,16 +89,17 @@ final class GuardLogger
     }
 
     /**
-     * The table columns are VARCHAR(255); JSON values (custom_fields, vat_ids) can be longer.
-     * Only the DB sink is truncated — the channel log line above carries the full value.
+     * The table columns are VARCHAR(255) by default (`field` is VARCHAR(64), passed via $max);
+     * JSON values (custom_fields, vat_ids) can be longer. Only the DB sink is truncated — the
+     * channel log line above carries the full value.
      */
-    private static function truncate(?string $value): ?string
+    private static function truncate(?string $value, int $max = 255): ?string
     {
-        if ($value === null || mb_strlen($value) <= 255) {
+        if ($value === null || mb_strlen($value) <= $max) {
             return $value;
         }
 
-        return mb_substr($value, 0, 254) . '…';
+        return mb_substr($value, 0, $max - 1) . '…';
     }
 
     /**
