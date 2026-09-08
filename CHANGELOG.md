@@ -14,6 +14,34 @@
   truncated in the table only.
 - Internal: `Values` helper shared by all guards (bools compared as `1`/`0`, custom-field structures by
   canonical JSON); `FieldGuard` and `AddressGuard` services; the subscriber only routes commands.
+- Verified end-to-end on the local yam-shop dev shop (Shopware 6.6.10.18, PHP 8.3, `APP_ENV=prod`, real DAL
+  and Admin API, integration labelled `JTL Connector`), on one existing customer with one address.
+  **Upgrade path:** 1.1.0 was installed first, then `plugin:update` ran migration `1789171200` — the table
+  gained `entity` (default `customer`) and `entity_id`, and the `blocked_update` row written under 1.1.0
+  read `entity = customer` afterwards. **Customer columns:** in `log_only` a PATCH with `title`, `company`,
+  `vatIds` and `groupId` returned 204, applied all four and produced three `observed_field` rows carrying
+  the pre-write values (all NULL) and none for `customer_group_id`; in `enforce` the same PATCH applied the
+  group, kept `title`/`company`/`vat_ids` and produced three `blocked_field` rows. **Custom fields:**
+  `hinweis_(intern)` was applied and `paypalexpresspayerid` guarded with one
+  `blocked_field / custom_fields.paypalexpresspayerid` row — the guarded key stays in `custom_fields` as
+  JSON `null` (the `JSON_SET` writes the reverted null back) rather than disappearing. **Addresses:** an
+  address update inside the connector's own `POST /api/_action/sync` batch kept `street` and `zipcode`
+  (two `blocked_address` rows with `entity = customer_address` and the address id) while the group of the
+  same batch was applied; an address create in that batch under policy `log` created the address and
+  recorded eight `observed_address_create` rows (one per non-null column) with the attempted values, and
+  the `defaultBillingAddressId` the connector sent in the same write was blocked as a customer column, so
+  the new address never became the default; `DELETE /api/customer-address/{id}` returned 204 and recorded
+  eight `observed_address_delete` rows with the previous values. **`reject_write`:** the same create sync
+  failed with HTTP 400 `FRAMEWORK__WRITE_CONSTRAINT_VIOLATION` ("the connector may not create or delete
+  addresses of existing customers (addressCreateDeletePolicy=reject_write)"), no address was created, and
+  both the channel line **and** the `rejected_write` DB row survived the rollback of that write.
+  **Connector create:** a sync upsert of a brand-new customer carrying one address returned 200, logged
+  nothing from 003, and 001 still remapped the connector number `51520` to `10011` from the shop range.
+  **Regression:** the same PATCH through a second integration (`Other API client`) and through an admin
+  user applied every field and produced no audit row (only the "not identified as the connector" debug
+  line for the integration), and in the same build 001 still kept `customer_number` and 002 still kept
+  `email` and `first_name` on an attempted email swap. No plugin change was needed — all eleven steps
+  matched the expectation.
 
 ## 1.1.0 — 2026-09-07
 
