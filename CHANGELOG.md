@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0 — unreleased
+
+- Feature 003: connector field allow-list — on an existing customer the JTL-Connector may change only
+  `customer_group_id` (config `allowedFields`) and the two Wawi note custom fields (`allowedCustomFields`);
+  every other customer column, custom-field key and address column is kept (`enforce`) or recorded with its
+  pre-write value (`log_only`). New or deleted addresses of existing customers are recorded per column, or
+  reject the whole write under `addressCreateDeletePolicy=reject_write`. Own switches `fieldGuardEnabled` /
+  `fieldGuardMode` (ships `log_only`), independent of 001 and 002.
+- New audit actions `blocked_field`, `observed_field`, `blocked_address`, `observed_address`,
+  `observed_address_create`, `observed_address_delete`, `rejected_write`; new columns `entity` and
+  `entity_id` on `revinners_jtl_guard_log` (migration `1789171200`); values over 255 characters are
+  truncated in the table only.
+- Internal: `Values` helper shared by all guards (bools compared as `1`/`0`, custom-field structures by
+  canonical JSON); `FieldGuard` and `AddressGuard` services; the subscriber only routes commands.
+
 ## 1.1.0 — 2026-09-07
 
 - Feature 002: customer identity write protection — a connector update can no longer replace an

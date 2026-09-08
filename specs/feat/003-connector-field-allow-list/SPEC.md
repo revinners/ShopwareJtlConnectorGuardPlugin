@@ -2,7 +2,7 @@
 
 > Plugin: **ShopwareJtlConnectorGuardPlugin** (`revinners/shopware6-jtl-connector-guard`)
 > Third feature in the plugin. Builds on **001** (number guard) and **002** (identity guard): same connector detection, same `log_only`/`enforce` pattern, same audit table. Reverses the model from "block a few named columns" to "allow one named column, guard everything else", and extends the guard to the address entity.
-> Status: **READY — 2026-09-08. Open questions resolved by SQL pre-checks on yam-shop.de; see PLAN.md.**
+> Status: **IMPLEMENTED — see PLAN.md; to be released as 1.2.0 (date filled at release). Ships log_only.**
 
 ---
 
