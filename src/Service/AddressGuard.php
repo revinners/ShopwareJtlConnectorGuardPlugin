@@ -193,6 +193,8 @@ final class AddressGuard
     private function recordCreateOrDelete(EntityWriteEvent $event, WriteCommand $command, string $addressHex, array $columns, CustomerState $customer, FieldGuardConfig $config, ConnectorSource $connector, string $action): void
     {
         if ($config->rejectsAddressCreateDelete()) {
+            // DeleteCommand::getPath() is always '' in Shopware 6.6 (its constructor passes '' to
+            // the parent), so a rejected delete surfaces with pointer '/'; inserts carry the real path.
             $violation = new ConstraintViolation(self::REJECT_MESSAGE, null, [], null, $command->getPath(), null);
             $event->getWriteContext()->getExceptions()->add(
                 new WriteConstraintViolationException(new ConstraintViolationList([$violation]), $command->getPath())
