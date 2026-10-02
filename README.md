@@ -2,9 +2,9 @@
 
 `revinners/shopware6-jtl-connector-guard` — a container plugin for every fix we apply on top of the
 JTL-Connector (JTL-Wawi → Shopware). Shops: **yam-shop.de**, **ducati-world24.com** (Shopware 6.6.10.x).
-Features: **001** customer number write protection (1.0.x), **002** customer identity write protection (1.1.0), **003** connector field allow-list (1.2.0).
+It does two things: **customer number write protection** and the **same-person check** (with applying a misdirected change to the right account). The earlier identity guard (1.1.0) and field allow-list (1.2.0) were removed in 1.3.0 — the plugin had never been installed on a production shop, and the same-person check covers what they were for.
 
-## Feature 001 — customer number write protection
+## Customer number write protection
 
 The JTL-Connector pushes Wawi's "Kundennummer Onlineshop" into `customer.customer_number` on every
 customer change, creating duplicate numbers (see `specs/feat/001-customer-number-write-protection/SPEC.md`).
@@ -12,7 +12,7 @@ This plugin makes Shopware the owner of the number:
 
 - **Existing customers:** a connector write that would change `customer_number` (or any other column
   listed in *Protected customer columns*) has that column reverted to the current value; every other
-  field of the same write (customer group, addresses, …) is applied normally.
+  field of the same write is left to the same-person check below.
 - **Connector-created customers:** the supplied number is replaced by one reserved from the shop's own
   `customer` number range (for the customer's sales channel), exactly like a storefront registration.
 - **Audit trail:** every intervention is written to the Monolog channel `jtl_connector_guard`
@@ -21,8 +21,7 @@ This plugin makes Shopware the owner of the number:
   Those two are the reliable sinks. Shopware's prod Monolog config runs the `main` handler as
   `fingers_crossed` with `action_level: error`, so an `info` line only reaches `prod.log` if an
   *error* also happens in the same request — the guard's routine `blocked_update` /
-  `remapped_create` lines (and, from feature 002, `blocked_identity` / `observed_identity`) will
-  not show up there. Only the guard's own `error` lines (an
+  `remapped_create` / `blocked_mismatch` / `rerouted` lines will not show up there. Only the guard's own `error` lines (an
   internal failure, or a logging sink that itself failed — see *Implementation notes*) are
   expected to land in the main log; treat `jtl_connector_guard_<env>.log` and the DB table as
   the sources of truth for auditing.
@@ -30,33 +29,33 @@ This plugin makes Shopware the owner of the number:
 ### How connector writes are identified
 
 The connector authenticates as an Admin API **integration** (client credentials), so its writes carry
-an `AdminApiSource` with an integration id and no user id. That integration is matched by **label**
-(default `JTL-Connector`; matching ignores case, whitespace and punctuation, so the `JTL Connector`
-label used on yam-shop.de matches too) and/or by explicit ids from the plugin config. Anything
+an `AdminApiSource` with an integration id and no user id. The plugin guards only writes of the
+integration(s) **selected in its settings** (`integrationIds`, a dropdown of the shop's integrations —
+the stable integration id is stored, so renaming the integration or regenerating its access key changes
+nothing). There is no matching by name. **With nothing selected the plugin does nothing.** Anything
 else — admin users, storefront, CLI, imports, other integrations — is never touched.
 
-### Configuration (Settings → Extensions → JTL-Connector Guard, per sales channel capable)
+### Configuration (Settings → Extensions → JTL-Connector Guard)
+
+Switches and modes are read per sales channel (of the customer). The integration selection is not:
+every integration selected in any scope counts for the whole shop, so picking it with a sales channel
+selected in the settings cannot leave the plugin idle.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `true` | master switch |
-| `mode` | `log_only` | `log_only` = observe and log, change nothing; `enforce` = block / remap |
-| `integrationLabels` | `JTL-Connector` | comma-separated integration labels |
-| `integrationIds` | *(empty)* | comma-separated 32-char hex integration ids |
+| `enabled` | `true` | **master switch of the whole plugin**, including the same-person check |
+| `mode` | `log_only` | customer number protection: `log_only` = observe and log, change nothing; `enforce` = block / remap |
+| `integrationIds` | *(empty)* | **required** — the connector's integration(s), picked from a dropdown in the admin (stored as a list of 32-char hex ids; a comma-separated string set over the CLI works too) |
 | `protectedFields` | `customer_number` | storage columns of `customer` the connector may not change (customer_number always included) |
 
 ### Rollout
 
-1. Before installing on a shop, confirm the connector's integration label/id in
-   Settings → System → Integrations:
-   - **yam-shop.de:** the production integration is labelled `JTL Connector`. The default
-     `integrationLabels` (`JTL-Connector`) already matches it thanks to normalisation (matching
-     ignores case, whitespace and punctuation), but set `integrationIds` to
-     `019b8946ccc67767b9fb8cb524300ba1` as well so detection does not depend on the label
-     surviving a future rename.
-   - **ducati-world24.com:** verify the integration label/id in Settings → System → Integrations
-     before install; do not assume it matches the default.
-2. Install and activate — it starts in `log_only`. In this mode the guard only *observes*:
+1. Install and activate, then open the plugin settings and **select the connector's integration** —
+   until that is done the plugin guards nothing:
+   - **yam-shop.de:** `JTL Connector` (id `019b8946ccc67767b9fb8cb524300ba1`).
+   - **ducati-world24.com:** `JTL-Connector`; check Settings → System → Integrations.
+   Over the CLI: `bin/console system:config:set ShopwareJtlConnectorGuardPlugin.config.integrationIds <id>`.
+2. It starts in `log_only`. In this mode the guard only *observes*:
    Wawi still overwrites `customer_number` while you watch, nothing is blocked yet. Keep this
    window short — a few days of real pushes is enough to confirm detection — then switch to
    `enforce`; leaving `log_only` on longer does not protect any customer number.
@@ -83,110 +82,77 @@ else — admin users, storefront, CLI, imports, other integrations — is never 
   line the guard emits falls back to Shopware's main `logger` service if the `jtl_connector_guard`
   channel itself cannot be written (e.g. its log file cannot be opened). No failure of either
   logger can propagate out of `onEntityWrite()` and into the DAL write.
-- Custom-field writes arrive as a separate `JsonUpdateCommand` (payload keyed by custom-field key);
-  001/002 ignore it, 003 guards it per key.
+- Custom-field writes arrive as a separate `JsonUpdateCommand` (payload keyed by custom-field key); the
+  number guard ignores it, the same-person check guards it per key for a different person.
 
-## Feature 002 — customer identity write protection
+## Same-person check
 
-The same connector push also replaces a customer's **identity**: `email` and `first_name`/`last_name`
-are overwritten with a different person's data while the address entity stays untouched (see
-`specs/feat/002-customer-identity-write-protection/SPEC.md` for the evidence; 38 confirmed cases on
-yam-shop.de). Feature 002 extends the guard, with its own switches, independent of the number guard:
+The merchant edits customers in JTL-Wawi and wants those edits in the shop; what must never happen is
+Wawi writing customer A onto customer B's account, which it does whenever its link points at the wrong
+shop account (44 confirmed accounts on yam-shop.de, see `specs/feat/004-same-person-check/SPEC.md`).
+The e-mail in the connector's write decides:
 
-- **Email** (the hard identity key): a connector update that would change an existing customer's
-  email to a *different* address (case-insensitive, trimmed) is kept in `enforce`, observed in `log_only`.
-- **Name**: per `identityGuardProtectName` — `on_email_swap` (default) keeps the name only when the
-  same write also swaps the email and otherwise logs the name change as observed and applies it;
-  `always` guards the name like the email; `off` ignores name changes entirely.
-- Everything else in the write (group, addresses, …) is applied. Connector-created customers are
-  not affected. Admin, storefront, CLI and other-integration writes are never touched.
-- Audit actions: `blocked_identity` (value kept) and `observed_identity` (value applied — either
-  `log_only`, or an unprotected name-only change); `field` is `email`, `first_name` or `last_name`.
-
-| Key | Default | Meaning |
-|---|---|---|
-| `identityGuardEnabled` | `true` | master switch of feature 002 |
-| `identityGuardMode` | `log_only` | `log_only` = observe; `enforce` = keep the current email / name |
-| `identityGuardProtectName` | `on_email_swap` | `on_email_swap` / `always` / `off` (see above) |
-
-**Caveat:** if `email` is also listed in the 001 `protectedFields`, the 001 guard (and its mode)
-owns the email field itself — it alone decides whether the email is kept or applied, and the
-identity guard never acts on `email` again. The identity guard still uses the connector's attempted
-email swap to drive the name policy (per `identityGuardProtectName`), so a name swapped in the same
-write is still guarded even though the identity guard does not touch `email`. Do not list `email`
-there unless that overlap is intended.
-
-Rollout mirrors feature 001: deploy in `log_only`, watch `revinners_jtl_guard_log` for
-`observed_identity` rows (`SELECT field, current_value, attempted_value, email FROM revinners_jtl_guard_log WHERE action LIKE '%identity' ORDER BY created_at DESC`),
-then switch `identityGuardMode` to `enforce`. As with feature 001, in `log_only` the identity
-damage keeps happening — the connector still overwrites email/name while you observe — so keep
-this window short; leaving `log_only` on longer does not protect any customer's identity.
-Repairing already-swapped accounts is a separate data job (spec 002, "Out of scope").
-
-## Feature 003 — connector field allow-list (customer + address)
-
-001 and 002 guard four columns. The merchant's actual rule is an allow-list with one entry: on an
-existing customer the JTL-Connector may change **only the customer group**. Feature 003 turns that
-into config (see `specs/feat/003-connector-field-allow-list/SPEC.md`), with its own switches,
-independent of 001 and 002:
-
-- **Customer columns:** every column present in a connector update that is not on `allowedFields`
-  (default `customer_group_id`, always included), not a bookkeeping column (`created_at`,
-  `updated_at`, `created_by_id`, `updated_by_id`, `auto_increment`, `version_id`) and not already
-  owned by 001/002, is kept in `enforce` and recorded with its pre-write value in `log_only`.
-  Actions `blocked_field` / `observed_field`.
-- **Customer custom fields:** the connector owns the `custom_jtl` custom-field set and pushes Wawi's
-  notes `anmerkung` and `hinweis_(intern)`; those two keys are allowed by default
-  (`allowedCustomFields`, enter `none` to allow nothing). Any other key is guarded per key, logged as
-  `custom_fields.<key>`. In `enforce`, a guarded key the customer did not have before is written back
-  as JSON `null` (the DAL cannot remove a key), so `custom_fields` may accrete `"<key>": null`
-  entries; harmless for the admin, which renders null as empty.
-- **Addresses:** an update of an existing customer's address is guarded column by column with no
-  allow-list (`blocked_address` / `observed_address`). A **new or deleted address** of an existing
-  customer cannot be removed from the connector's write by the DAL, so it is recorded one row per
-  column (`observed_address_create` / `observed_address_delete`); the customer's default address ids
-  are customer columns and therefore stay, so a recorded new address never becomes the default.
-  With `addressCreateDeletePolicy=reject_write` **and** `fieldGuardMode=enforce` the whole connector
-  write is rejected instead (`rejected_write`). That fails every customer in the same sync batch, so
-  keep the default `log` unless the log shows creates/deletes actually happening.
-  `fieldGuardEnabled` is read from the global config to decide whether address commands are
-  inspected at all; a shop that disables it globally and re-enables it for one sales channel gets
-  customer-column guarding but no address guarding on that channel.
-- Connector-created customers (and their addresses) are not affected. Admin, storefront, CLI and
-  other-integration writes are never touched.
-- Audit rows for addresses carry `entity = customer_address` and `entity_id` (the address id);
-  customer rows carry `entity = customer`. Values longer than 255 characters are truncated in the
-  table only; the channel log line keeps the full value.
+- **Same e-mail as the account** (case-insensitive, trimmed), or no e-mail in the write: the same
+  person. Everything is applied — addresses, name, company, VAT id, group, custom fields — and nothing
+  is logged. Only `customer_number` stays protected, by 001.
+- **A different e-mail**: a different person. In `enforce` nothing of that write lands: every changed
+  customer column (including the group), every custom-field key and every address of that customer in
+  the same write is kept. In `log_only` it is applied and each replaced value is recorded. Actions
+  `blocked_mismatch` / `observed_mismatch`; address rows carry `entity = customer_address` and the
+  address id.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `fieldGuardEnabled` | `true` | master switch of feature 003 |
-| `fieldGuardMode` | `log_only` | `log_only` = record and apply; `enforce` = keep current values |
-| `allowedFields` | `customer_group_id` | customer columns the connector may change (group always included) |
-| `allowedCustomFields` | `anmerkung,hinweis_(intern)` | customer custom-field keys the connector may write; `none` = no key |
-| `addressCreateDeletePolicy` | `log` | `log` = record a new/deleted address; `reject_write` = fail the whole write (enforce only) |
+| `samePersonGuardEnabled` | `true` | master switch of the same-person check |
+| `samePersonGuardMode` | `log_only` | `log_only` = record and apply; `enforce` = keep the account as it is |
+| `samePersonRerouteEnabled` | `true` | enforce only: apply the kept write to the registered account with the e-mail it carried |
+| `samePersonRerouteFields` | `customer_group_id,salutation_id,title,first_name,last_name,company,vat_ids` | columns that are transferred (`account_type` is supported too) |
+| `addressCreateDeletePolicy` | `log` | a different person's write that creates/deletes an address: `log` = record it; `reject_write` = fail the whole write (enforce only) |
 
-**Precedence:** 001 → 002 → 003. A column 001 lists in `protectedFields` is handled by 001 only.
-`email`, `first_name`, `last_name` are handled by 002 only while `identityGuardEnabled` is on — so
-to have names kept under the allow-list, set `identityGuardProtectName` to `always`; with the
-identity guard disabled those three columns fall to 003 like any other column. With the identity
-guard enabled and `identityGuardProtectName=off`, a connector name change is neither kept nor
-recorded by any guard (002 skips it by policy and 003 leaves the identity columns to 002); use
-`always` under the allow-list.
+**Applied to the right account.** JTL-Wawi's data about the customer is correct; only the shop account
+it addresses is wrong (on yam-shop.de: old JTL-Shop key − 40494 = `auto_increment` of the account that
+gets hit). So in `enforce` the kept write is applied, right after the connector's request, to the **single
+registered (non-guest) account whose e-mail equals the one in the write**: actions `rerouted`, one row
+per changed column, `customer_id` = the account that was updated, `assigned_value` = the account the
+connector addressed. If no such account exists, or more than one, nothing is written and one
+`reroute_skipped` row records the e-mail and the reason (`no_registered_account` /
+`several_registered_accounts` / `write_failed`). The target must carry exactly that e-mail (case and
+surrounding spaces aside) — the database's looser collation (`é` = `e`) is not trusted. Customer number and e-mail are never transferred. Guest accounts are
+never a target. This keeps group and master-data changes in the ERP working while the links are wrong.
 
-**Rollout:** the point of this feature is the observation window. Deploy in `log_only` for one or
-two months: every `observed_*` row holds the value the connector replaced, keyed by customer and
-column, which is the data needed to restore those accounts afterwards (repair is a separate job,
-see spec "Out of scope"). Then switch `fieldGuardMode` to `enforce`. As with 001/002, in `log_only`
-the damage keeps happening while you observe. A `rejected_write` DB row can be rolled back together
-with the write it rejected; the channel file line is the reliable record for that action. Before
-`enforce` on ducati-world24.com, run the custom-fields pre-check SQL from the spec there too.
+Things to know:
 
-**Upgrading an installed plugin in place:** replace the files, then `bin/console cache:clear` →
-`plugin:refresh` → `plugin:update ShopwareJtlConnectorGuardPlugin` → `cache:clear`. Running
-`plugin:refresh` against a warm container compiled from the previous version fails with a
-constructor TypeError (`Argument #6 ($fieldGuard) must be of type FieldGuard`) and, on production,
-breaks every customer write until the cache is cleared.
+- **A genuine e-mail change made in Wawi is blocked** together with the rest of that write. Change the
+  e-mail in the Shopware admin instead — admin writes are never guarded.
+- A different-person write that **creates or deletes an address** cannot have that command removed (the
+  DAL offers no way): it is recorded per column (`observed_address_create` / `observed_address_delete`)
+  and the default address ids are kept, so the foreign address never becomes the default — or the whole
+  write is rejected with `addressCreateDeletePolicy=reject_write` (enforce only; that fails every
+  customer in the same sync batch).
+- An **address-only write** carries no e-mail and is applied.
+- Run the number guard in `enforce` alongside. If it is still `log_only`, a different-person write has
+  its number kept by the same-person check anyway, but a same-person write may still change the number.
+- **Who is guarded:** only writes of the Admin API integration(s) selected in the settings. Any other integration, admin users, the storefront and the CLI are never touched.
+- **Not logged:** same-person writes, which are simply applied.
+- **Several commands for one customer in one write** (a sync batch) are judged together: one command
+  with a foreign e-mail makes all of them a different person's write.
+- **The reroute happens only after the connector's write went through.** If the write fails and is
+  rolled back, nothing is rerouted; the `blocked_*` rows already written then describe an attempt (a
+  `warning` line in the channel log says so).
+- **Deleting the account's default address** in a different person's write is always rejected in
+  `enforce` (whole write fails): the default address ids are kept, so the account would otherwise point
+  at an address that no longer exists.
+- **An address of a third customer** cannot be moved onto the account by such a write either.
+- **A customer who changes their e-mail in the shop** keeps the old one in Wawi. From then on every Wawi
+  edit of that customer is a "different person" here: blocked, and `reroute_skipped /
+  no_registered_account`. Update the e-mail in Wawi as well; such rows in the log are the signal.
+- **Not guarded:** tags (`customer_tag`) and other child entities sent with a different person's write,
+  and a connector DELETE of a customer.
+- **The log holds personal data** (e-mails, names, address columns, VAT ids) and is not pruned
+  automatically; the audit entity can be written through the Admin API by an admin.
+- `log_only` protects nobody; keep it only until one real push shows up in the log.
+- **An account whose e-mail is already swapped is not protected:** the write carries "its" e-mail. Repair
+  such accounts first; until then they also make the pushed e-mail ambiguous (`reroute_skipped`).
 
 ## Development
 
@@ -202,5 +168,5 @@ shop checkout, then `bin/console plugin:refresh && bin/console plugin:install --
 **Upgrading an installed plugin in place:** replace the files, then `bin/console cache:clear` →
 `plugin:refresh` → `plugin:update ShopwareJtlConnectorGuardPlugin` → `cache:clear`. Running
 `plugin:refresh` against a warm container compiled from the previous version fails with a
-constructor TypeError (`Argument #6 ($fieldGuard) must be of type FieldGuard`) and, on production,
+constructor TypeError (the subscriber's constructor changes between versions) and, on production,
 breaks every customer write until the cache is cleared.

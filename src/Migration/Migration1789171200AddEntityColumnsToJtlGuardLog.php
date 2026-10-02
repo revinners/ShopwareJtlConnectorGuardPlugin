@@ -8,7 +8,7 @@ use Doctrine\DBAL\Connection;
 use Shopware\Core\Framework\Migration\MigrationStep;
 
 /**
- * Feature 003: address rows need to say which address they belong to. `entity` defaults to
+ * Address rows need to say which address they belong to. `entity` defaults to
  * `customer` so every existing row keeps its meaning without a data migration.
  *
  * @internal

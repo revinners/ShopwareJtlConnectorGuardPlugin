@@ -1,5 +1,7 @@
 # 003 - Connector Field Allow-List (customer + address)
 
+> **REMOVED in 1.3.0 (2026-10-02).** The field allow-list was replaced by the same-person check, see `specs/feat/004-same-person-check/SPEC.md`. Kept for history only.
+
 > Plugin: **ShopwareJtlConnectorGuardPlugin** (`revinners/shopware6-jtl-connector-guard`)
 > Third feature in the plugin. Builds on **001** (number guard) and **002** (identity guard): same connector detection, same `log_only`/`enforce` pattern, same audit table. Reverses the model from "block a few named columns" to "allow one named column, guard everything else", and extends the guard to the address entity.
 > Status: **IMPLEMENTED — see PLAN.md; to be released as 1.2.0 (date filled at release). Ships log_only.**

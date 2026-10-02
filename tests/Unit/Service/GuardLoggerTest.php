@@ -210,70 +210,12 @@ final class GuardLoggerTest extends TestCase
         self::assertArrayHasKey('integrationLabel', $array);
     }
 
-    private function identityEntry(string $action, string $mode, string $field = 'email'): GuardLogEntry
-    {
-        return new GuardLogEntry(
-            action: $action,
-            mode: $mode,
-            field: $field,
-            customerId: '019daaeff59572c2a4f5c068e613edb5',
-            email: 'tobiasschroeer1999@web.de',
-            firstName: 'Tobias',
-            lastName: 'Schröer',
-            currentValue: $field === 'email' ? 'tobiasschroeer1999@web.de' : 'Schröer',
-            attemptedValue: $field === 'email' ? 'info@motorradgarage-dachau.de' : 'Kühnel',
-            assignedValue: null,
-            integrationId: '019b8946ccc67767b9fb8cb524300ba1',
-            integrationLabel: 'JTL Connector',
-            salesChannelId: null,
-        );
-    }
-
-    public function testBlockedIdentityMessageSaysTheEmailWasKept(): void
-    {
-        $logger = $this->createMock(LoggerInterface::class);
-        $logger->expects(self::once())->method('info')->with(self::logicalAnd(
-            self::stringContains('blocked_identity'),
-            self::stringContains('kept "tobiasschroeer1999@web.de"'),
-            self::stringContains('connector sent "info@motorradgarage-dachau.de"'),
-            self::stringContains('identity guard'),
-        ), self::anything());
-
-        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $this->createMock(Connection::class)))
-            ->log($this->identityEntry(GuardLogEntry::ACTION_BLOCKED_IDENTITY, 'enforce'));
-    }
-
-    public function testObservedIdentityInEnforceModeSaysTheValueWasApplied(): void
-    {
-        // an unprotected name-only change is observed even while the identity guard is in enforce
-        $logger = $this->createMock(LoggerInterface::class);
-        $logger->expects(self::once())->method('info')->with(self::logicalAnd(
-            self::stringContains('observed_identity'),
-            self::stringContains('connector sent "Kühnel" over "Schröer" and it was applied'),
-            self::logicalNot(self::stringContains('kept "')),
-        ), self::anything());
-
-        (new GuardLogger($logger, $this->createMock(LoggerInterface::class), $this->createMock(Connection::class)))
-            ->log($this->identityEntry(GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'enforce', 'last_name'));
-    }
-
-    public function testIdentityRowIsPersistedWithItsAction(): void
-    {
-        $connection = $this->createMock(Connection::class);
-        $connection->expects(self::once())->method('insert')->with('revinners_jtl_guard_log', self::callback(
-            static fn (array $row): bool => $row['action'] === 'observed_identity' && $row['field'] === 'email' && $row['mode'] === 'log_only'
-        ));
-
-        (new GuardLogger($this->createMock(LoggerInterface::class), $this->createMock(LoggerInterface::class), $connection))
-            ->log($this->identityEntry(GuardLogEntry::ACTION_OBSERVED_IDENTITY, 'log_only'));
-    }
-
     public function testAddressRowCarriesEntityAndEntityIdAndTruncatesLongValues(): void
     {
         $addressId = Uuid::randomHex();
         $long = str_repeat('x', 300);
         $entry = new GuardLogEntry(
-            action: GuardLogEntry::ACTION_BLOCKED_ADDRESS,
+            action: GuardLogEntry::ACTION_BLOCKED_MISMATCH,
             mode: 'enforce',
             field: 'street',
             customerId: '019df771764772929f1136e52180ccf6',
@@ -293,7 +235,7 @@ final class GuardLoggerTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::once())->method('info')->with(
             self::logicalAnd(
-                self::stringContains('blocked_address'),
+                self::stringContains('blocked_mismatch'),
                 self::stringContains('customer_address ' . $addressId . '.street'),
                 self::stringContains('kept "Nelkenweg 12"'),
                 self::stringContains($long),
@@ -324,7 +266,7 @@ final class GuardLoggerTest extends TestCase
     {
         $longField = 'custom_fields.' . str_repeat('x', 90);
         $entry = new GuardLogEntry(
-            action: GuardLogEntry::ACTION_BLOCKED_FIELD,
+            action: GuardLogEntry::ACTION_BLOCKED_MISMATCH,
             mode: 'enforce',
             field: $longField,
             customerId: '019df771764772929f1136e52180ccf6',
@@ -365,19 +307,17 @@ final class GuardLoggerTest extends TestCase
     /**
      * @return iterable<string, array{string, string, string}>
      */
-    public static function fieldGuardMessages(): iterable
+    public static function actionMessages(): iterable
     {
-        yield 'blocked_field' => [GuardLogEntry::ACTION_BLOCKED_FIELD, 'enforce', 'kept "Nelkenweg 12", connector sent "Grasiger Weg 20" (field guard)'];
-        yield 'observed_field' => [GuardLogEntry::ACTION_OBSERVED_FIELD, 'log_only', 'connector sent "Grasiger Weg 20" over "Nelkenweg 12" and it was applied (field guard, observed only)'];
-        yield 'blocked_address' => [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'enforce', 'kept "Nelkenweg 12", connector sent "Grasiger Weg 20" (field guard)'];
-        yield 'observed_address' => [GuardLogEntry::ACTION_OBSERVED_ADDRESS, 'log_only', 'connector sent "Grasiger Weg 20" over "Nelkenweg 12" and it was applied (field guard, observed only)'];
         yield 'observed_address_create' => [GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE, 'enforce', 'connector created it with "Grasiger Weg 20" (cannot be blocked, recorded)'];
         yield 'observed_address_delete' => [GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE, 'enforce', 'connector deleted it, had "Nelkenweg 12" (cannot be blocked, recorded)'];
+        yield 'blocked_mismatch' => [GuardLogEntry::ACTION_BLOCKED_MISMATCH, 'enforce', 'kept "Nelkenweg 12", connector sent "Grasiger Weg 20" (same-person check: the write carries a different e-mail)'];
+        yield 'observed_mismatch' => [GuardLogEntry::ACTION_OBSERVED_MISMATCH, 'log_only', 'connector sent "Grasiger Weg 20" over "Nelkenweg 12" and it was applied (same-person check, observed only'];
         yield 'rejected_write' => [GuardLogEntry::ACTION_REJECTED_WRITE, 'enforce', 'whole connector write rejected (policy reject_write)'];
     }
 
-    #[DataProvider('fieldGuardMessages')]
-    public function testFieldGuardMessages(string $action, string $mode, string $expected): void
+    #[DataProvider('actionMessages')]
+    public function testActionMessages(string $action, string $mode, string $expected): void
     {
         $entry = new GuardLogEntry(
             action: $action,

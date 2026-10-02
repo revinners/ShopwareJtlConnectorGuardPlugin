@@ -8,7 +8,7 @@ use Shopware\Core\Framework\Uuid\Uuid;
 
 /**
  * One definition of "same value" and "value for the audit log" shared by the number guard,
- * the identity guard, the field guard and the address guard. Payload values are what the DAL
+ * the same-person guard and the address guard. Payload values are what the DAL
  * serializers produced (scalars, bools, binary ids, JSON-encoded strings for JSON columns,
  * PHP arrays for custom-field keys); current values are raw DB rows (strings, `1`/`0`, binary).
  */
@@ -16,11 +16,20 @@ final class Values
 {
     /**
      * Columns whose real value must never leave the guard's own decision: secrets
-     * (`password`, `legacy_password`, `legacy_encoder`) and PII (`remote_address`, an IP) that
+     * (`password`, `legacy_password`, `legacy_encoder`, the double-opt-in `hash`) and PII (`remote_address`, an IP) that
      * `CustomerStateLoader`'s `SELECT *` pulls in like any other column. The guard still
      * keeps/reverts the real value; only the audit record (channel log line and DB row) is redacted.
      */
-    private const REDACTED_COLUMNS = ['password', 'legacy_password', 'legacy_encoder', 'remote_address'];
+    private const REDACTED_COLUMNS = ['password', 'legacy_password', 'legacy_encoder', 'remote_address', 'hash'];
+
+    /** Storage name of the JSON column the DAL updates through JsonUpdateCommand. */
+    public const CUSTOM_FIELDS_COLUMN = 'custom_fields';
+
+    /**
+     * Columns Shopware writes on every update and that carry no merchant data. Never guarded,
+     * never logged, on `customer` and on `customer_address` alike.
+     */
+    private const BOOKKEEPING_COLUMNS = ['id', 'version_id', 'created_at', 'created_by_id', 'updated_at', 'updated_by_id', 'auto_increment'];
 
     private function __construct()
     {
@@ -37,6 +46,23 @@ final class Values
         }
 
         return self::scalar($a) === self::scalar($b);
+    }
+
+    public static function isBookkeeping(string $column): bool
+    {
+        return \in_array($column, self::BOOKKEEPING_COLUMNS, true);
+    }
+
+    /**
+     * E-mail as an identity key: case-insensitive and trimmed. null only equals null.
+     */
+    public static function sameEmail(mixed $a, mixed $b): bool
+    {
+        if ($a === null || $b === null) {
+            return $a === $b;
+        }
+
+        return mb_strtolower(trim((string) $a)) === mb_strtolower(trim((string) $b));
     }
 
     /**

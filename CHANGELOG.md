@@ -1,6 +1,67 @@
 # Changelog
 
-## 1.2.0 — unreleased
+## 1.3.0 — 2026-10-02
+
+- Feature 004: same-person check — replaces the "only the customer group may change" rule of 003, which
+  blocked the merchant's legitimate Wawi edits (addresses, name, company) and still let a wrongly linked
+  customer's group through. On a connector update of an existing customer the e-mail decides: a write
+  carrying the account's own e-mail (or no e-mail) is applied in full; a write carrying a different e-mail
+  is another customer pushed onto this account, so every changed column, custom-field key and address of
+  that customer in the write is kept (`enforce`) or recorded with the value it replaced (`log_only`).
+  The customer number stays with the number guard. Own switches `samePersonGuardEnabled` (default on) /
+  `samePersonGuardMode` (ships `log_only`).
+- **Removed: feature 002 (identity guard, 1.1.0) and feature 003 (field allow-list, 1.2.0)** with their
+  settings (`identityGuard*`, `fieldGuard*`, `allowedFields`, `allowedCustomFields`), services and audit
+  actions (`*_identity`, `*_field`, `*_address`). The plugin had not been installed on any production
+  shop; it now does exactly two things: number protection and the same-person check.
+  `addressCreateDeletePolicy` stays and belongs to the same-person check. Stale `system_config` rows of
+  the removed keys on a shop that had 1.1/1.2 installed are ignored.
+- **Applied to the right account:** in `enforce`, a write kept away from a foreign account is applied
+  to the single registered (non-guest) account with the e-mail the write carried — Wawi's data is right,
+  only the account it addresses is wrong. None or several such accounts: nothing is written, the attempt
+  is recorded. Transferred columns are configurable (`samePersonRerouteFields`, default group, salutation,
+  title, name, company, VAT ids); customer number and e-mail never are. Switch `samePersonRerouteEnabled`
+  (default on). Runs after the controller (`kernel.response`), through the DAL with a system context.
+- **`enabled` is the master switch of the whole plugin now** (it used to switch only the number guard).
+- Review fixes before release (2026-10-02): the person is judged per customer, not per command (a second
+  command without an e-mail in the same batch no longer slips through); the reroute is queued from the
+  write event's success callback, so a rolled-back write reroutes nothing; the reroute target is
+  re-checked with the check's own e-mail comparison instead of trusting the DB collation; a failed
+  reroute leaves a `reroute_skipped / write_failed` row; a different person's write that deletes the
+  account's default address is rejected in enforce (it would leave a dangling default id); an address of
+  a third customer can no longer be re-parented onto the flagged account; the selected integration is
+  matched over every config scope; the double-opt-in `hash` is redacted in the audit trail; the debug
+  line for every write of a non-selected integration is gone. Found by the end-to-end run: a
+  switch set to `false` over `bin/console system:config:set` is stored as the string "false" and was read
+  as on — switches now understand it.
+- **Connector identification is explicit now:** the setting `integrationLabels` and all matching by
+  integration name are gone. `integrationIds` is a dropdown of the shop's integrations in the plugin
+  settings (the id is stored); with nothing selected the plugin does nothing. A shop upgrading from
+  1.0–1.2 must select the integration once.
+- New audit actions `blocked_mismatch` / `observed_mismatch` / `rerouted` / `reroute_skipped` (for the
+  last two `assigned_value` holds the addressed account id resp. the reason). No migration.
+- A genuine e-mail change made in Wawi is blocked with the rest of that write — change it in the Shopware
+  admin (never guarded).
+- Internal: `SamePersonGuard` and `CustomerRerouter` services; `AddressGuard` only acts for a customer the
+  same write identified as a different person; `FieldGuard`, `FieldGuardConfig`, `IdentityGuardConfig` are gone. The subscriber gained a constructor argument, so the
+  upgrade order in the README (`cache:clear` before `plugin:refresh`) applies.
+- Verified end-to-end on the local yam-shop dev shop (Shopware 6.6.10.18, PHP 8.3, Apache/mod_php,
+  `APP_ENV=prod`, real DAL and Admin API, a test integration) on 2026-10-01, and again on 2026-10-02 after
+  the removals, the integration picker and the review fixes (see the end of this entry).
+  **Same person** (own e-mail in another case): name, company, group, custom fields, an address update and
+  a new address were all applied, the number was kept by 001, no 004 row. **Different person, enforce**
+  (PATCH): e-mail, name, company, group, a custom field and the address in the same write were kept — six
+  `blocked_mismatch` rows on the customer, two with `entity = customer_address` — and 001 kept the number.
+  **Sync batch** with a different-person item and a same-person item: the first was kept, the second
+  applied. **log_only:** applied, `observed_mismatch` rows with the pre-write values. **Other
+  integration:** applied, no row. **Reroute:** the kept group/name/company/VAT ids landed on the registered
+  account with the pushed e-mail (`rerouted` rows), a guest account with the same e-mail stayed untouched,
+  a repeat changed nothing; a second registered account → `reroute_skipped / several_registered_accounts`;
+  unknown e-mail → `reroute_skipped / no_registered_account`; `log_only` → nothing rerouted.
+  A first version flushed on `kernel.terminate` and never ran on that shop — hence `kernel.response`.
+  Not yet verified with a real push from JTL-Wawi.
+
+## 1.2.0 — 2026-09-08 (tagged, never installed on production; superseded by 1.3.0)
 
 - Feature 003: connector field allow-list — on an existing customer the JTL-Connector may change only
   `customer_group_id` (config `allowedFields`) and the two Wawi note custom fields (`allowedCustomFields`);

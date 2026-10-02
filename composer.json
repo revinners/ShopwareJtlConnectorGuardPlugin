@@ -1,7 +1,7 @@
 {
   "name": "revinners/shopware6-jtl-connector-guard",
-  "description": "Guards Shopware data against unwanted overwrites by the JTL-Connector (JTL-Wawi): customer number, e-mail and name write protection, plus an allow-list over every other customer and address field.",
-  "version": "1.2.0",
+  "description": "Guards Shopware data against unwanted overwrites by the JTL-Connector (JTL-Wawi): customer number write protection, plus a same-person check that lets JTL-Wawi edit a customer but never write one customer onto another customer's account.",
+  "version": "1.3.0",
   "type": "shopware-platform-plugin",
   "license": "proprietary",
   "authors": [
@@ -36,9 +36,9 @@
       "pl-PL": "JTL-Connector Guard"
     },
     "description": {
-      "de-DE": "Schützt Shopware-Kundendaten vor dem Überschreiben durch den JTL-Connector: Kundennummer, E-Mail, Name und – per Freigabeliste – alle weiteren Kunden- und Adressfelder.",
-      "en-GB": "Protects Shopware customer data from being overwritten by the JTL-Connector: customer number, e-mail, name and, via an allow-list, every other customer and address field.",
-      "pl-PL": "Chroni dane klientów Shopware przed nadpisaniem przez JTL-Connector: numer klienta, e-mail, nazwisko oraz, przez listę dozwolonych, wszystkie pozostałe pola klienta i adresu."
+      "de-DE": "Schützt Shopware-Kundendaten vor dem JTL-Connector: Kundennummer, sowie eine Gleiche-Person-Prüfung – JTL-Wawi darf Kunden bearbeiten, aber nie einen Kunden auf das Konto eines anderen schreiben.",
+      "en-GB": "Protects Shopware customer data from the JTL-Connector: the customer number, plus a same-person check. JTL-Wawi may edit a customer but never write one customer onto another customer's account.",
+      "pl-PL": "Chroni dane klientów Shopware przed JTL-Connectorem: numer klienta oraz kontrola tej samej osoby. JTL-Wawi może edytować klienta, ale nigdy nie nadpisze konta jednego klienta danymi innego."
     }
   },
   "config": {

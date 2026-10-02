@@ -32,10 +32,14 @@ final class ShopwareJtlConnectorGuardPluginTest extends TestCase
     {
         $xml = (string) file_get_contents(__DIR__ . '/../../src/Resources/config/config.xml');
 
-        foreach (['enabled', 'mode', 'integrationLabels', 'integrationIds', 'protectedFields', 'identityGuardEnabled', 'identityGuardMode', 'identityGuardProtectName'] as $key) {
+        foreach (['enabled', 'mode', 'integrationIds', 'protectedFields', 'samePersonGuardEnabled', 'samePersonGuardMode', 'samePersonRerouteEnabled', 'samePersonRerouteFields', 'addressCreateDeletePolicy'] as $key) {
             self::assertStringContainsString('<name>' . $key . '</name>', $xml);
         }
         self::assertStringContainsString('<defaultValue>log_only</defaultValue>', $xml);
-        self::assertStringContainsString('<defaultValue>on_email_swap</defaultValue>', $xml);
+        self::assertSame(2, substr_count($xml, '<card>'), 'number guard + same-person check, nothing else');
+        self::assertStringNotContainsString('integrationLabels', $xml);
+        self::assertStringContainsString('<entity>integration</entity>', $xml);
+        self::assertStringNotContainsString('identityGuard', $xml);
+        self::assertStringNotContainsString('fieldGuard', $xml);
     }
 }

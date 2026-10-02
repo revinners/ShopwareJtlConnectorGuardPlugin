@@ -105,7 +105,7 @@ final class GuardLogger
     /**
      * The message states what actually happened, which differs per mode: in `log_only` the
      * connector's value IS applied, so the line must not claim the old value was kept.
-     * Identity actions carry their outcome in the action itself (`blocked_*` = kept,
+     * Same-person actions carry their outcome in the action itself (`blocked_*` = kept,
      * `observed_*` = applied), so they do not depend on `mode`.
      */
     private function message(GuardLogEntry $entry): string
@@ -120,27 +120,26 @@ final class GuardLogger
             $this->fieldLabel($entry),
             match ($entry->action) {
                 GuardLogEntry::ACTION_REMAPPED_CREATE => $this->createOutcome($entry),
-                GuardLogEntry::ACTION_BLOCKED_IDENTITY => sprintf(
-                    'kept "%s", connector sent "%s" (identity guard)',
+                GuardLogEntry::ACTION_BLOCKED_MISMATCH => sprintf(
+                    'kept "%s", connector sent "%s" (same-person check: the write carries a different e-mail)',
                     $entry->currentValue ?? '',
                     $entry->attemptedValue ?? '',
                 ),
-                GuardLogEntry::ACTION_OBSERVED_IDENTITY => sprintf(
-                    'connector sent "%s" over "%s" and it was applied (identity guard, observed only)',
+                GuardLogEntry::ACTION_OBSERVED_MISMATCH => sprintf(
+                    'connector sent "%s" over "%s" and it was applied (same-person check, observed only: the write carries a different e-mail)',
                     $entry->attemptedValue ?? '',
                     $entry->currentValue ?? '',
                 ),
-                GuardLogEntry::ACTION_BLOCKED_FIELD,
-                GuardLogEntry::ACTION_BLOCKED_ADDRESS => sprintf(
-                    'kept "%s", connector sent "%s" (field guard)',
-                    $entry->currentValue ?? '',
+                GuardLogEntry::ACTION_REROUTED => sprintf(
+                    'set to "%s" (was "%s"): the connector sent it to customer %s, this is the account with the e-mail it carried',
                     $entry->attemptedValue ?? '',
+                    $entry->currentValue ?? '',
+                    $entry->assignedValue ?? '?',
                 ),
-                GuardLogEntry::ACTION_OBSERVED_FIELD,
-                GuardLogEntry::ACTION_OBSERVED_ADDRESS => sprintf(
-                    'connector sent "%s" over "%s" and it was applied (field guard, observed only)',
+                GuardLogEntry::ACTION_REROUTE_SKIPPED => sprintf(
+                    'write for "%s" was kept away from this account and applied nowhere (%s)',
                     $entry->attemptedValue ?? '',
-                    $entry->currentValue ?? '',
+                    $entry->assignedValue ?? '',
                 ),
                 GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE => sprintf(
                     'connector created it with "%s" (cannot be blocked, recorded)',
