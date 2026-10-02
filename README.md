@@ -2,7 +2,10 @@
 
 `revinners/shopware6-jtl-connector-guard` — a container plugin for every fix we apply on top of the
 JTL-Connector (JTL-Wawi → Shopware). Shops: **yam-shop.de**, **ducati-world24.com** (Shopware 6.6.10.x).
-It does two things: **customer number write protection** and the **same-person check** (with applying a misdirected change to the right account). The earlier identity guard (1.1.0) and field allow-list (1.2.0) were removed in 1.3.0 — the plugin had never been installed on a production shop, and the same-person check covers what they were for.
+It does two things: **customer number write protection** and the **same-person check** (with applying a
+misdirected change to the right account). The earlier identity guard (1.1.0) and field allow-list (1.2.0)
+were removed in 1.3.0 — the plugin had never been installed on a production shop, and the same-person
+check covers what they were for.
 
 ## Customer number write protection
 
@@ -21,8 +24,8 @@ This plugin makes Shopware the owner of the number:
   Those two are the reliable sinks. Shopware's prod Monolog config runs the `main` handler as
   `fingers_crossed` with `action_level: error`, so an `info` line only reaches `prod.log` if an
   *error* also happens in the same request — the guard's routine `blocked_update` /
-  `remapped_create` / `blocked_mismatch` / `rerouted` lines will not show up there. Only the guard's own `error` lines (an
-  internal failure, or a logging sink that itself failed — see *Implementation notes*) are
+  `remapped_create` / `blocked_mismatch` / `rerouted` lines will not show up there. Only the guard's
+  own `error` lines (an internal failure, or a logging sink that itself failed — see *Implementation notes*) are
   expected to land in the main log; treat `jtl_connector_guard_<env>.log` and the DB table as
   the sources of truth for auditing.
 
@@ -55,19 +58,23 @@ selected in the settings cannot leave the plugin idle.
    - **yam-shop.de:** `JTL Connector` (id `019b8946ccc67767b9fb8cb524300ba1`).
    - **ducati-world24.com:** `JTL-Connector`; check Settings → System → Integrations.
    Over the CLI: `bin/console system:config:set ShopwareJtlConnectorGuardPlugin.config.integrationIds <id>`.
-2. It starts in `log_only`. In this mode the guard only *observes*:
-   Wawi still overwrites `customer_number` while you watch, nothing is blocked yet. Keep this
-   window short — a few days of real pushes is enough to confirm detection — then switch to
-   `enforce`; leaving `log_only` on longer does not protect any customer number.
-3. Trigger a push (change a linked customer's Kundengruppe in Wawi) and check the log / table for a
-   `blocked_update` row with the attempted number.
-4. Switch `mode` to `enforce`, repeat: the number must stay, the group must still change.
-5. Roll out to **one shop first**. Watch `revinners_jtl_guard_log` and the channel file
+2. Both parts start in `log_only`. In this mode the guard only *observes*: Wawi still overwrites the
+   account while you watch, nothing is blocked and nothing is rerouted. Keep this window short — one
+   real push is enough to confirm the connector is recognised — because `log_only` protects nobody.
+3. Trigger a push (change a customer's Kundengruppe in Wawi) and check the log / table: a
+   `blocked_update` row if the number differs, `observed_mismatch` rows if the push carried another
+   customer's e-mail. No rows at all for a push you know happened means the integration is not selected.
+4. Switch both modes to `enforce`: `mode` (customer number) and `samePersonGuardMode` (same-person
+   check). Repeat the push: the addressed account must stay as it is, and the change must arrive on the
+   account with the pushed e-mail (`rerouted` rows).
+5. Repair the accounts whose e-mail was already swapped before the plugin was live — they are not
+   protected until then (see *Things to know* below).
+6. Roll out to **one shop first**. Watch `revinners_jtl_guard_log` and the channel file
    (`var/log/jtl_connector_guard_<env>.log`) for a few days of real traffic before installing on
    the second shop.
-6. Both shops require PHP >= 8.2 (see `composer.json`). yam-shop.de is verified on PHP 8.3; check
+7. Both shops require PHP >= 8.2 (see `composer.json`). yam-shop.de is verified on PHP 8.3; check
    the running PHP version on ducati-world24.com before install.
-7. Release checklist: when releasing, bump `version` in `composer.json` and create the git tag
+8. Release checklist: when releasing, bump `version` in `composer.json` and create the git tag
    with the same value — Composer ignores a tag whose `composer.json` version disagrees.
 
 ### Implementation notes
@@ -78,7 +85,7 @@ selected in the settings cannot leave the plugin idle.
   Re-verify this on every Shopware minor upgrade.
 - The audit row is inserted with plain DBAL inside the event (no nested DAL write) and can never
   break the customer write.
-- Both the channel logger call and the DB insert are wrapped independently, and every error/debug
+- Both the channel logger call and the DB insert are wrapped independently, and every error/warning
   line the guard emits falls back to Shopware's main `logger` service if the `jtl_connector_guard`
   channel itself cannot be written (e.g. its log file cannot be opened). No failure of either
   logger can propagate out of `onEntityWrite()` and into the DAL write.
@@ -94,7 +101,7 @@ The e-mail in the connector's write decides:
 
 - **Same e-mail as the account** (case-insensitive, trimmed), or no e-mail in the write: the same
   person. Everything is applied — addresses, name, company, VAT id, group, custom fields — and nothing
-  is logged. Only `customer_number` stays protected, by 001.
+  is logged. Only `customer_number` stays protected, by the number guard.
 - **A different e-mail**: a different person. In `enforce` nothing of that write lands: every changed
   customer column (including the group), every custom-field key and every address of that customer in
   the same write is kept. In `log_only` it is applied and each replaced value is recorded. Actions
@@ -103,7 +110,7 @@ The e-mail in the connector's write decides:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `samePersonGuardEnabled` | `true` | master switch of the same-person check |
+| `samePersonGuardEnabled` | `true` | switch of the same-person check (the plugin's master switch is `enabled`, above) |
 | `samePersonGuardMode` | `log_only` | `log_only` = record and apply; `enforce` = keep the account as it is |
 | `samePersonRerouteEnabled` | `true` | enforce only: apply the kept write to the registered account with the e-mail it carried |
 | `samePersonRerouteFields` | `customer_group_id,salutation_id,title,first_name,last_name,company,vat_ids` | columns that are transferred (`account_type` is supported too) |
@@ -117,8 +124,8 @@ per changed column, `customer_id` = the account that was updated, `assigned_valu
 connector addressed. If no such account exists, or more than one, nothing is written and one
 `reroute_skipped` row records the e-mail and the reason (`no_registered_account` /
 `several_registered_accounts` / `write_failed`). The target must carry exactly that e-mail (case and
-surrounding spaces aside) — the database's looser collation (`é` = `e`) is not trusted. Customer number and e-mail are never transferred. Guest accounts are
-never a target. This keeps group and master-data changes in the ERP working while the links are wrong.
+surrounding spaces aside) — the database's looser collation (`é` = `e`) is not trusted. Customer number
+and e-mail are never transferred. Guest accounts are never a target. This keeps group and master-data changes in the ERP working while the links are wrong.
 
 Things to know:
 
@@ -132,7 +139,8 @@ Things to know:
 - An **address-only write** carries no e-mail and is applied.
 - Run the number guard in `enforce` alongside. If it is still `log_only`, a different-person write has
   its number kept by the same-person check anyway, but a same-person write may still change the number.
-- **Who is guarded:** only writes of the Admin API integration(s) selected in the settings. Any other integration, admin users, the storefront and the CLI are never touched.
+- **Who is guarded:** only writes of the Admin API integration(s) selected in the settings. Any other
+  integration, admin users, the storefront and the CLI are never touched.
 - **Not logged:** same-person writes, which are simply applied.
 - **Several commands for one customer in one write** (a sync batch) are judged together: one command
   with a foreign e-mail makes all of them a different person's write.
@@ -165,6 +173,10 @@ Unit tests mock the plugin's `final` services, so `dg/bypass-finals` is enabled 
 
 Local shop integration: copy the plugin into `custom/plugins/ShopwareJtlConnectorGuardPlugin` of the
 shop checkout, then `bin/console plugin:refresh && bin/console plugin:install --activate ShopwareJtlConnectorGuardPlugin`.
+**Coming from 1.0–1.2:** `integrationLabels` is gone and `integrationIds` used to be a text field; select
+the integration once in the settings (or delete the stale `system_config` row first if the dropdown shows
+nothing sensible).
+
 **Upgrading an installed plugin in place:** replace the files, then `bin/console cache:clear` →
 `plugin:refresh` → `plugin:update ShopwareJtlConnectorGuardPlugin` → `cache:clear`. Running
 `plugin:refresh` against a warm container compiled from the previous version fails with a
