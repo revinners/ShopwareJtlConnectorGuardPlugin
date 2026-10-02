@@ -4,20 +4,21 @@ declare(strict_types=1);
 
 namespace Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Service;
 
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
-use Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
-use Revinners\ShopwareJtlConnectorGuardPlugin\Service\IdentityGuardConfig;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 
 final class GuardConfigProviderTest extends TestCase
 {
     private SystemConfigService&MockObject $systemConfig;
+    private Connection&MockObject $connection;
 
     protected function setUp(): void
     {
         $this->systemConfig = $this->createMock(SystemConfigService::class);
+        $this->connection = $this->createMock(Connection::class);
     }
 
     /**
@@ -33,7 +34,7 @@ final class GuardConfigProviderTest extends TestCase
             }
         );
 
-        return new GuardConfigProvider($this->systemConfig);
+        return new GuardConfigProvider($this->systemConfig, $this->connection);
     }
 
     public function testDefaultsWhenNothingIsConfigured(): void
@@ -42,8 +43,7 @@ final class GuardConfigProviderTest extends TestCase
 
         self::assertTrue($config->enabled);
         self::assertFalse($config->enforce, 'ships in log_only');
-        self::assertSame(['JTL-Connector'], $config->integrationLabels);
-        self::assertSame([], $config->integrationIds);
+        self::assertSame([], $config->integrationIds, 'nothing selected = nothing guarded');
         self::assertSame(['customer_number'], $config->protectedFields);
     }
 
@@ -52,14 +52,12 @@ final class GuardConfigProviderTest extends TestCase
         $config = $this->providerWith([
             'enabled' => false,
             'mode' => 'enforce',
-            'integrationLabels' => ' JTL-Connector , Wawi Sync ,, ',
             'integrationIds' => "019DF771764772929F1136E52180CCF6,\n2103c0f8ba934cbdb291287aaa3b5ce8, not-a-uuid",
             'protectedFields' => 'customer_group_id, customer_number ,email',
         ])->load('sc-1');
 
         self::assertFalse($config->enabled);
         self::assertTrue($config->enforce);
-        self::assertSame(['JTL-Connector', 'Wawi Sync'], $config->integrationLabels);
         self::assertSame(
             ['019df771764772929f1136e52180ccf6', '2103c0f8ba934cbdb291287aaa3b5ce8'],
             $config->integrationIds,
@@ -84,9 +82,9 @@ final class GuardConfigProviderTest extends TestCase
 
     public function testLoadIsMemoisedPerSalesChannel(): void
     {
-        $this->systemConfig->expects(self::exactly(26))->method('get')->willReturn(null); // 13 keys x 2 channels
+        $this->systemConfig->expects(self::exactly(18))->method('get')->willReturn(null); // 9 keys x 2 channels
 
-        $provider = new GuardConfigProvider($this->systemConfig);
+        $provider = new GuardConfigProvider($this->systemConfig, $this->connection);
         $provider->load(null);
         $provider->load(null);
         $provider->load('sc-1');
@@ -95,110 +93,135 @@ final class GuardConfigProviderTest extends TestCase
 
     public function testResetClearsTheMemo(): void
     {
-        $this->systemConfig->expects(self::exactly(26))->method('get')->willReturn(null); // 13 keys x 2 channels
+        $this->systemConfig->expects(self::exactly(18))->method('get')->willReturn(null); // 9 keys x 2 channels
 
-        $provider = new GuardConfigProvider($this->systemConfig);
+        $provider = new GuardConfigProvider($this->systemConfig, $this->connection);
         $provider->load(null);
         $provider->reset();
         $provider->load(null);
     }
 
-    public function testIdentityGuardDefaultsWhenNothingIsConfigured(): void
+    public function testSamePersonCheckDefaultsWhenNothingIsConfigured(): void
     {
-        $identity = $this->providerWith([])->load()->identity;
+        $samePerson = $this->providerWith([])->load()->samePerson;
 
-        self::assertTrue($identity->enabled);
-        self::assertFalse($identity->enforce, 'identity guard ships in log_only');
-        self::assertSame(IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP, $identity->protectName);
+        self::assertTrue($samePerson->enabled);
+        self::assertFalse($samePerson->enforce, 'ships in log_only');
+        self::assertSame('log_only', $samePerson->mode());
     }
 
-    public function testIdentityGuardParsesConfiguredValues(): void
+    public function testSamePersonCheckParsesConfiguredValues(): void
     {
-        $identity = $this->providerWith([
-            'identityGuardEnabled' => false,
-            'identityGuardMode' => 'enforce',
-            'identityGuardProtectName' => 'always',
-        ])->load('sc-1')->identity;
+        $samePerson = $this->providerWith(['samePersonGuardEnabled' => false, 'samePersonGuardMode' => 'enforce'])->load()->samePerson;
 
-        self::assertFalse($identity->enabled);
-        self::assertTrue($identity->enforce);
-        self::assertSame(IdentityGuardConfig::PROTECT_NAME_ALWAYS, $identity->protectName);
+        self::assertFalse($samePerson->enabled);
+        self::assertTrue($samePerson->enforce);
     }
 
-    public function testIdentityGuardIsIndependentOfTheNumberGuard(): void
+    public function testUnknownSamePersonModeFallsBackToLogOnly(): void
     {
-        $config = $this->providerWith(['enabled' => false, 'mode' => 'log_only', 'identityGuardMode' => 'enforce'])->load();
-
-        self::assertFalse($config->enabled);
-        self::assertFalse($config->enforce);
-        self::assertTrue($config->identity->enabled);
-        self::assertTrue($config->identity->enforce);
+        self::assertFalse($this->providerWith(['samePersonGuardMode' => 'yolo'])->load()->samePerson->enforce);
     }
 
-    public function testUnknownIdentityValuesFallBackToDefaults(): void
+    public function testRerouteDefaultsOnWithTheDefaultColumns(): void
     {
-        $identity = $this->providerWith(['identityGuardMode' => 'yolo', 'identityGuardProtectName' => 'sometimes'])->load()->identity;
+        $samePerson = $this->providerWith([])->load()->samePerson;
 
-        self::assertFalse($identity->enforce);
-        self::assertSame(IdentityGuardConfig::PROTECT_NAME_ON_EMAIL_SWAP, $identity->protectName);
+        self::assertTrue($samePerson->reroute);
+        self::assertSame(['customer_group_id', 'salutation_id', 'title', 'first_name', 'last_name', 'company', 'vat_ids'], $samePerson->rerouteFields);
+        self::assertFalse($samePerson->reroutes(), 'log_only never reroutes');
     }
 
-    public function testFieldGuardDefaultsWhenNothingIsConfigured(): void
+    public function testRerouteColumnsAreLimitedToTheSupportedOnes(): void
     {
-        $fieldGuard = $this->providerWith([])->load()->fieldGuard;
+        $samePerson = $this->providerWith(['samePersonGuardMode' => 'enforce', 'samePersonRerouteFields' => 'customer_group_id, email, customer_number, company'])->load()->samePerson;
 
-        self::assertTrue($fieldGuard->enabled);
-        self::assertFalse($fieldGuard->enforce, 'field guard ships in log_only');
-        self::assertSame(['customer_group_id'], $fieldGuard->allowedFields);
-        self::assertSame(['anmerkung', 'hinweis_(intern)'], $fieldGuard->allowedCustomFields, 'the two Wawi note keys (spec open question 2)');
-        self::assertSame(FieldGuardConfig::POLICY_LOG, $fieldGuard->addressCreateDeletePolicy);
+        self::assertSame(['customer_group_id', 'company'], $samePerson->rerouteFields);
+        self::assertTrue($samePerson->reroutes());
     }
 
-    public function testFieldGuardParsesConfiguredValues(): void
+    public function testRerouteCanBeSwitchedOff(): void
     {
-        $fieldGuard = $this->providerWith([
-            'fieldGuardEnabled' => false,
-            'fieldGuardMode' => 'enforce',
-            'allowedFields' => ' vat_ids , customer_group_id ,, account_type',
-            'allowedCustomFields' => "anmerkung,\n custom_marker ",
-            'addressCreateDeletePolicy' => 'reject_write',
-        ])->load('sc-1')->fieldGuard;
-
-        self::assertFalse($fieldGuard->enabled);
-        self::assertTrue($fieldGuard->enforce);
-        self::assertSame(['customer_group_id', 'vat_ids', 'account_type'], $fieldGuard->allowedFields);
-        self::assertSame(['anmerkung', 'custom_marker'], $fieldGuard->allowedCustomFields);
-        self::assertSame(FieldGuardConfig::POLICY_REJECT_WRITE, $fieldGuard->addressCreateDeletePolicy);
+        self::assertFalse($this->providerWith(['samePersonGuardMode' => 'enforce', 'samePersonRerouteEnabled' => false])->load()->samePerson->reroutes());
     }
 
-    public function testCustomerGroupIsAlwaysAllowed(): void
+    public function testAddressCreateDeletePolicyDefaultsToLog(): void
     {
-        $fieldGuard = $this->providerWith(['allowedFields' => 'title'])->load()->fieldGuard;
-
-        self::assertSame(['customer_group_id', 'title'], $fieldGuard->allowedFields);
+        self::assertSame('log', $this->providerWith([])->load()->samePerson->addressCreateDeletePolicy);
     }
 
-    public function testAllowedCustomFieldsNoneMeansNoKeyAllowed(): void
+    public function testUnknownAddressCreateDeletePolicyFallsBackToLog(): void
     {
-        self::assertSame([], $this->providerWith(['allowedCustomFields' => ' NONE '])->load()->fieldGuard->allowedCustomFields);
-        self::assertSame([], $this->providerWith(['allowedCustomFields' => 'none'])->load()->fieldGuard->allowedCustomFields);
+        self::assertSame('log', $this->providerWith(['addressCreateDeletePolicy' => 'yolo'])->load()->samePerson->addressCreateDeletePolicy);
     }
 
-    public function testUnknownFieldGuardValuesFallBackToDefaults(): void
+    public function testRejectWritePolicyBitesOnlyInEnforce(): void
     {
-        $fieldGuard = $this->providerWith(['fieldGuardMode' => 'yolo', 'addressCreateDeletePolicy' => 'explode'])->load()->fieldGuard;
-
-        self::assertFalse($fieldGuard->enforce);
-        self::assertSame(FieldGuardConfig::POLICY_LOG, $fieldGuard->addressCreateDeletePolicy);
+        self::assertTrue($this->providerWith(['addressCreateDeletePolicy' => 'reject_write', 'samePersonGuardMode' => 'enforce'])->load()->samePerson->rejectsAddressCreateDelete());
     }
 
-    public function testFieldGuardIsIndependentOfTheOtherGuards(): void
+    public function testRejectWritePolicyIsInertInLogOnly(): void
     {
-        $config = $this->providerWith(['enabled' => false, 'identityGuardEnabled' => false, 'fieldGuardMode' => 'enforce'])->load();
+        self::assertFalse($this->providerWith(['addressCreateDeletePolicy' => 'reject_write'])->load()->samePerson->rejectsAddressCreateDelete());
+    }
 
-        self::assertFalse($config->enabled);
-        self::assertFalse($config->identity->enabled);
-        self::assertTrue($config->fieldGuard->enabled);
-        self::assertTrue($config->fieldGuard->enforce);
+    public function testIntegrationIdsFromTheAdminSelectArriveAsAnArray(): void
+    {
+        $config = $this->providerWith(['integrationIds' => ['019B8946CCC67767B9FB8CB524300BA1', '', 'not-a-uuid', 42]])->load();
+
+        self::assertSame(['019b8946ccc67767b9fb8cb524300ba1'], $config->integrationIds);
+    }
+
+    public function testConnectorIntegrationIdsAreTheUnionOfEveryScope(): void
+    {
+        // global row, a sales-channel row saved by the admin picker, a legacy comma string, junk
+        $this->connection->expects(self::once())->method('fetchFirstColumn')
+            ->with(self::stringContains('`system_config`'), ['key' => 'ShopwareJtlConnectorGuardPlugin.config.integrationIds'])
+            ->willReturn([
+                '{"_value": ["019B8946CCC67767B9FB8CB524300BA1"]}',
+                '{"_value": ["2103c0f8ba934cbdb291287aaa3b5ce8", "019b8946ccc67767b9fb8cb524300ba1"]}',
+                '{"_value": "e2e00000000000000000000000000001, nope"}',
+                'not json',
+            ]);
+
+        $provider = new GuardConfigProvider($this->systemConfig, $this->connection);
+
+        self::assertSame(
+            ['019b8946ccc67767b9fb8cb524300ba1', '2103c0f8ba934cbdb291287aaa3b5ce8', 'e2e00000000000000000000000000001'],
+            $provider->connectorIntegrationIds()
+        );
+        $provider->connectorIntegrationIds(); // memoised: the query ran once
+    }
+
+    public function testNoIntegrationSelectedAnywhereGivesAnEmptyList(): void
+    {
+        $this->connection->method('fetchFirstColumn')->willReturn([]);
+
+        self::assertSame([], (new GuardConfigProvider($this->systemConfig, $this->connection))->connectorIntegrationIds());
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('provideSwitchValues')]
+    public function testSwitchesUnderstandWhatTheConsoleStores(mixed $stored, bool $expected): void
+    {
+        $config = $this->providerWith(['enabled' => $stored, 'samePersonGuardEnabled' => $stored, 'samePersonRerouteEnabled' => $stored])->load();
+
+        self::assertSame($expected, $config->enabled);
+        self::assertSame($expected, $config->samePerson->enabled);
+        self::assertSame($expected, $config->samePerson->reroute);
+    }
+
+    /**
+     * @return iterable<string, array{0: mixed, 1: bool}>
+     */
+    public static function provideSwitchValues(): iterable
+    {
+        yield 'admin false' => [false, false];
+        yield 'admin true' => [true, true];
+        yield 'console "false"' => ['false', false];
+        yield 'console "0"' => ['0', false];
+        yield 'console "off"' => [' OFF ', false];
+        yield 'console "true"' => ['true', true];
+        yield 'console "1"' => ['1', true];
+        yield 'int 0' => [0, false];
     }
 }

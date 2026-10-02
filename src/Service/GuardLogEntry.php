@@ -13,32 +13,26 @@ final readonly class GuardLogEntry
 
     public const ACTION_REMAPPED_CREATE = 'remapped_create';
 
-    /** Feature 002: the guard wrote the current identity value back (enforce). */
-    public const ACTION_BLOCKED_IDENTITY = 'blocked_identity';
-
-    /** Feature 002: an identity change was recorded but applied (log_only, or an unprotected name change). */
-    public const ACTION_OBSERVED_IDENTITY = 'observed_identity';
-
-    /** Feature 003: a non-allowed `customer` column was kept (enforce). */
-    public const ACTION_BLOCKED_FIELD = 'blocked_field';
-
-    /** Feature 003: a non-allowed `customer` column change was recorded and applied (log_only). */
-    public const ACTION_OBSERVED_FIELD = 'observed_field';
-
-    /** Feature 003: a `customer_address` column was kept (enforce). */
-    public const ACTION_BLOCKED_ADDRESS = 'blocked_address';
-
-    /** Feature 003: a `customer_address` column change was recorded and applied (log_only). */
-    public const ACTION_OBSERVED_ADDRESS = 'observed_address';
-
-    /** Feature 003: the connector created an address of an existing customer (cannot be dropped; one row per column). */
+    /** A different person's write created an address on the account (cannot be dropped; one row per column). */
     public const ACTION_OBSERVED_ADDRESS_CREATE = 'observed_address_create';
 
-    /** Feature 003: the connector deleted an address of an existing customer (cannot be dropped; one row per column). */
+    /** A different person's write deleted an address of the account (cannot be dropped; one row per column). */
     public const ACTION_OBSERVED_ADDRESS_DELETE = 'observed_address_delete';
 
-    /** Feature 003: the whole connector write was rejected (policy reject_write). */
+    /** The whole connector write was rejected (policy reject_write). */
     public const ACTION_REJECTED_WRITE = 'rejected_write';
+
+    /** The write carried a different person's e-mail, the value was kept (enforce). */
+    public const ACTION_BLOCKED_MISMATCH = 'blocked_mismatch';
+
+    /** The write carried a different person's e-mail, the value was recorded and applied (log_only). */
+    public const ACTION_OBSERVED_MISMATCH = 'observed_mismatch';
+
+    /** A value kept away from a foreign account was applied to the account with the e-mail the write carried. */
+    public const ACTION_REROUTED = 'rerouted';
+
+    /** No single registered account with that e-mail exists, nothing was written. */
+    public const ACTION_REROUTE_SKIPPED = 'reroute_skipped';
 
     public const ENTITY_CUSTOMER = 'customer';
 

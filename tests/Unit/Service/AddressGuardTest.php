@@ -13,12 +13,11 @@ use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerAddressState;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerAddressStateLoader;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerState;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\CustomerStateLoader;
-use Revinners\ShopwareJtlConnectorGuardPlugin\Service\FieldGuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardConfigProvider;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogEntry;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Service\GuardLogger;
-use Revinners\ShopwareJtlConnectorGuardPlugin\Service\IdentityGuardConfig;
+use Revinners\ShopwareJtlConnectorGuardPlugin\Service\SamePersonGuardConfig;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Subscriber\CustomerAddressTestDefinition;
 use Revinners\ShopwareJtlConnectorGuardPlugin\Tests\Unit\Subscriber\CustomerTestDefinition;
 use Shopware\Core\Framework\Api\Context\AdminApiSource;
@@ -78,10 +77,10 @@ final class AddressGuardTest extends TestCase
         $this->connector = new ConnectorSource(self::INTEGRATION_ID, 'JTL-Connector');
     }
 
-    private function config(bool $enforce, string $policy = FieldGuardConfig::POLICY_LOG, bool $enabled = true): GuardConfig
+    private function config(bool $enforce, string $policy = SamePersonGuardConfig::POLICY_LOG, bool $enabled = true): GuardConfig
     {
-        return new GuardConfig(true, true, ['JTL-Connector'], [], ['customer_number'], IdentityGuardConfig::disabled(),
-            new FieldGuardConfig($enabled, $enforce, ['customer_group_id'], [], $policy));
+        return new GuardConfig(true, true, [], ['customer_number'],
+            new SamePersonGuardConfig($enabled, $enforce, false, SamePersonGuardConfig::DEFAULT_REROUTE_FIELDS, $policy));
     }
 
     private function existence(string $idHex, bool $exists): EntityExistence
@@ -155,14 +154,14 @@ final class AddressGuardTest extends TestCase
         $this->customerLoader->method('load')->with([Uuid::fromHexToBytes($customer)])->willReturn([$customer => $this->customer($customer)]);
 
         $cmd = $this->update($address, ['street' => 'Grasiger Weg 20', 'zipcode' => '93333', 'city' => 'Mainaschaff', 'updated_at' => '2026-09-08 10:00:00.000']);
-        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector, [$customer]);
 
         self::assertSame('Nelkenweg 12', $cmd->getPayload()['street']);
         self::assertSame('63814', $cmd->getPayload()['zipcode']);
         self::assertSame('2026-09-08 10:00:00.000', $cmd->getPayload()['updated_at'], 'bookkeeping untouched');
         self::assertSame([
-            [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'street', 'Nelkenweg 12', 'Grasiger Weg 20', 'customer_address', $address],
-            [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'zipcode', '63814', '93333', 'customer_address', $address],
+            [GuardLogEntry::ACTION_BLOCKED_MISMATCH, 'street', 'Nelkenweg 12', 'Grasiger Weg 20', 'customer_address', $address],
+            [GuardLogEntry::ACTION_BLOCKED_MISMATCH, 'zipcode', '63814', '93333', 'customer_address', $address],
         ], $this->logged);
     }
 
@@ -175,10 +174,10 @@ final class AddressGuardTest extends TestCase
         $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
 
         $cmd = $this->update($address, ['street' => 'Grasiger Weg 20']);
-        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector, [$customer]);
 
         self::assertSame('Grasiger Weg 20', $cmd->getPayload()['street']);
-        self::assertSame([[GuardLogEntry::ACTION_OBSERVED_ADDRESS, 'street', 'Nelkenweg 12', 'Grasiger Weg 20', 'customer_address', $address]], $this->logged);
+        self::assertSame([[GuardLogEntry::ACTION_OBSERVED_MISMATCH, 'street', 'Nelkenweg 12', 'Grasiger Weg 20', 'customer_address', $address]], $this->logged);
     }
 
     public function testAddressCustomFieldsHaveNoAllowList(): void
@@ -190,13 +189,13 @@ final class AddressGuardTest extends TestCase
         $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
 
         $cmd = $this->jsonUpdate($address, ['anmerkung' => 'neu', 'other' => 'x']);
-        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector, [$customer]);
 
         self::assertSame('alt', $cmd->getPayload()['anmerkung']);
         self::assertNull($cmd->getPayload()['other']);
         self::assertSame([
-            [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'custom_fields.anmerkung', 'alt', 'neu', 'customer_address', $address],
-            [GuardLogEntry::ACTION_BLOCKED_ADDRESS, 'custom_fields.other', null, 'x', 'customer_address', $address],
+            [GuardLogEntry::ACTION_BLOCKED_MISMATCH, 'custom_fields.anmerkung', 'alt', 'neu', 'customer_address', $address],
+            [GuardLogEntry::ACTION_BLOCKED_MISMATCH, 'custom_fields.other', null, 'x', 'customer_address', $address],
         ], $this->logged);
     }
 
@@ -208,7 +207,7 @@ final class AddressGuardTest extends TestCase
         $this->customerLoader->method('load')->willReturn([]);
 
         $cmd = $this->insert($address, ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Neu 1']);
-        $this->guard->guard($this->event([$cmd]), [$cmd], [$customer], [], $this->connector);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [$customer], [], $this->connector, [$customer]);
 
         self::assertSame([], $this->logged);
     }
@@ -222,7 +221,7 @@ final class AddressGuardTest extends TestCase
 
         $cmd = $this->insert($address, ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Grasiger Weg 20', 'city' => 'Neustadt', 'created_at' => '2026-09-08 10:00:00.000']);
         $event = $this->event([$cmd]);
-        $this->guard->guard($event, [$cmd], [], [], $this->connector);
+        $this->guard->guard($event, [$cmd], [], [], $this->connector, [$customer]);
 
         self::assertSame('Grasiger Weg 20', $cmd->getPayload()['street'], 'cannot be blocked');
         self::assertSame([], $event->getWriteContext()->getExceptions()->getExceptions());
@@ -242,7 +241,7 @@ final class AddressGuardTest extends TestCase
         $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
 
         $cmd = $this->delete($address);
-        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector, [$customer]);
 
         self::assertSame([
             [GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE, 'customer_id', $customer, null, 'customer_address', $address],
@@ -261,7 +260,7 @@ final class AddressGuardTest extends TestCase
         $this->configProvider->expects(self::never())->method('load');
 
         $cmd = $this->delete($address);
-        $this->guard->guard($this->event([$cmd]), [$cmd], [], [$customer], $this->connector);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [$customer], $this->connector, [$customer]);
 
         self::assertSame([], $this->logged);
     }
@@ -270,12 +269,12 @@ final class AddressGuardTest extends TestCase
     {
         $customer = Uuid::randomHex();
         $address = Uuid::randomHex();
-        $this->configProvider->method('load')->willReturn($this->config(enforce: true, policy: FieldGuardConfig::POLICY_REJECT_WRITE));
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, policy: SamePersonGuardConfig::POLICY_REJECT_WRITE));
         $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
 
         $cmd = $this->insert($address, ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Grasiger Weg 20']);
         $event = $this->event([$cmd]);
-        $this->guard->guard($event, [$cmd], [], [], $this->connector);
+        $this->guard->guard($event, [$cmd], [], [], $this->connector, [$customer]);
 
         $exceptions = $event->getWriteContext()->getExceptions()->getExceptions();
         self::assertCount(1, $exceptions);
@@ -288,12 +287,12 @@ final class AddressGuardTest extends TestCase
     {
         $customer = Uuid::randomHex();
         $address = Uuid::randomHex();
-        $this->configProvider->method('load')->willReturn($this->config(enforce: false, policy: FieldGuardConfig::POLICY_REJECT_WRITE));
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false, policy: SamePersonGuardConfig::POLICY_REJECT_WRITE));
         $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
 
         $cmd = $this->insert($address, ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Grasiger Weg 20']);
         $event = $this->event([$cmd]);
-        $this->guard->guard($event, [$cmd], [], [], $this->connector);
+        $this->guard->guard($event, [$cmd], [], [], $this->connector, [$customer]);
 
         self::assertSame([], $event->getWriteContext()->getExceptions()->getExceptions());
         self::assertSame(GuardLogEntry::ACTION_OBSERVED_ADDRESS_CREATE, $this->logged[0][0]);
@@ -308,7 +307,7 @@ final class AddressGuardTest extends TestCase
         $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
 
         $cmd = $this->update($address, ['street' => 'Grasiger Weg 20']);
-        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector, [$customer]);
 
         self::assertSame('Grasiger Weg 20', $cmd->getPayload()['street']);
         self::assertSame([], $this->logged);
@@ -328,8 +327,103 @@ final class AddressGuardTest extends TestCase
 
         $badCmd = $this->update($bad, ['street' => 'x']);
         $goodCmd = $this->update($good, ['street' => 'Grasiger Weg 20']);
-        $this->guard->guard($this->event([$badCmd, $goodCmd]), [$badCmd, $goodCmd], [], [], $this->connector);
+        $this->guard->guard($this->event([$badCmd, $goodCmd]), [$badCmd, $goodCmd], [], [], $this->connector, [$customer]);
 
         self::assertSame('Nelkenweg 12', $goodCmd->getPayload()['street'], 'guarded despite the earlier failure');
+    }
+
+    public function testTheSamePersonMayEditCreateAndDeleteAddresses(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true, policy: SamePersonGuardConfig::POLICY_REJECT_WRITE));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $update = $this->update($address, ['street' => 'Grasiger Weg 20']);
+        $insert = $this->insert(Uuid::randomHex(), ['customer_id' => Uuid::fromHexToBytes($customer), 'street' => 'Neue Str. 1']);
+        $delete = $this->delete($address);
+        $event = $this->event([$update, $insert, $delete]);
+        // no different person in this write: same person, or an address-only write
+        $this->guard->guard($event, [$update, $insert, $delete], [], [], $this->connector, []);
+
+        self::assertSame('Grasiger Weg 20', $update->getPayload()['street']);
+        self::assertSame([], $this->logged);
+        self::assertCount(0, $event->getWriteContext()->getExceptions()->getExceptions());
+    }
+
+    public function testDeletingTheAccountsDefaultAddressIsAlwaysRejectedInEnforce(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        // policy "log": without the forced reject the default id (kept, it is a customer column) would dangle
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->willReturn([$customer => new CustomerState($customer, [
+            'id' => Uuid::fromHexToBytes($customer),
+            'email' => 'reischl@t-online.de',
+            'default_billing_address_id' => Uuid::fromHexToBytes($address),
+            'default_shipping_address_id' => Uuid::randomBytes(),
+        ])]);
+
+        $cmd = $this->delete($address);
+        $event = $this->event([$cmd]);
+        $this->guard->guard($event, [$cmd], [], [], $this->connector, [$customer]);
+
+        self::assertCount(1, $event->getWriteContext()->getExceptions()->getExceptions());
+        self::assertSame(GuardLogEntry::ACTION_REJECTED_WRITE, $this->logged[0][0]);
+    }
+
+    public function testDeletingTheDefaultAddressIsOnlyRecordedInLogOnly(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: false));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->willReturn([$customer => new CustomerState($customer, [
+            'id' => Uuid::fromHexToBytes($customer),
+            'default_billing_address_id' => Uuid::fromHexToBytes($address),
+        ])]);
+
+        $cmd = $this->delete($address);
+        $event = $this->event([$cmd]);
+        $this->guard->guard($event, [$cmd], [], [], $this->connector, [$customer]);
+
+        self::assertCount(0, $event->getWriteContext()->getExceptions()->getExceptions());
+        self::assertSame(GuardLogEntry::ACTION_OBSERVED_ADDRESS_DELETE, $this->logged[0][0]);
+    }
+
+    public function testAnAddressOfAThirdCustomerCannotBeMovedOntoTheFlaggedAccount(): void
+    {
+        $flagged = Uuid::randomHex();
+        $third = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn($this->config(enforce: true));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $third)]);
+        $this->customerLoader->expects(self::once())->method('load')->with(self::callback(
+            static fn (array $ids): bool => \in_array(Uuid::fromHexToBytes($flagged), $ids, true) && \in_array(Uuid::fromHexToBytes($third), $ids, true)
+        ))->willReturn([$flagged => $this->customer($flagged), $third => $this->customer($third)]);
+
+        $cmd = $this->update($address, ['customer_id' => Uuid::fromHexToBytes($flagged), 'street' => 'Grasiger Weg 20']);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector, [$flagged]);
+
+        self::assertSame(Uuid::fromHexToBytes($third), $cmd->getPayload()['customer_id'], 'the address stays with its owner');
+        self::assertSame('Nelkenweg 12', $cmd->getPayload()['street']);
+        self::assertSame([GuardLogEntry::ACTION_BLOCKED_MISMATCH, GuardLogEntry::ACTION_BLOCKED_MISMATCH], array_column($this->logged, 0));
+    }
+
+    public function testTheMasterSwitchLeavesAddressesOfAFlaggedCustomerAlone(): void
+    {
+        $customer = Uuid::randomHex();
+        $address = Uuid::randomHex();
+        $this->configProvider->method('load')->willReturn(new GuardConfig(false, true, [], ['customer_number'], new SamePersonGuardConfig(true, true)));
+        $this->addressLoader->method('load')->willReturn([$address => $this->address($address, $customer)]);
+        $this->customerLoader->method('load')->willReturn([$customer => $this->customer($customer)]);
+
+        $cmd = $this->update($address, ['street' => 'Grasiger Weg 20']);
+        $this->guard->guard($this->event([$cmd]), [$cmd], [], [], $this->connector, [$customer]);
+
+        self::assertSame('Grasiger Weg 20', $cmd->getPayload()['street']);
+        self::assertSame([], $this->logged);
     }
 }

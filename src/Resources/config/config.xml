@@ -3,26 +3,26 @@
         xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/shopware/platform/trunk/src/Core/System/SystemConfig/Schema/config.xsd">
 
     <card>
-        <title>JTL-Connector Guard — customer number protection</title>
-        <title lang="de-DE">JTL-Connector Guard — Kundennummern-Schutz</title>
-        <title lang="pl-PL">JTL-Connector Guard — ochrona numerów klientów</title>
+        <title>JTL-Connector Guard — general and customer number protection</title>
+        <title lang="de-DE">JTL-Connector Guard — Allgemein und Kundennummern-Schutz</title>
+        <title lang="pl-PL">JTL-Connector Guard — ogólne i ochrona numerów klientów</title>
 
         <input-field type="bool">
             <name>enabled</name>
-            <label>Enabled</label>
-            <label lang="de-DE">Aktiv</label>
-            <label lang="pl-PL">Włączone</label>
-            <helpText>Master switch. When off, the plugin does nothing at all.</helpText>
-            <helpText lang="de-DE">Hauptschalter. Wenn aus, tut das Plugin gar nichts.</helpText>
-            <helpText lang="pl-PL">Główny przełącznik. Wyłączony = plugin nic nie robi.</helpText>
+            <label>Plugin enabled (master switch)</label>
+            <label lang="de-DE">Plugin aktiv (Hauptschalter)</label>
+            <label lang="pl-PL">Plugin włączony (główny przełącznik)</label>
+            <helpText>Master switch for everything below, including the same-person check. When off, the plugin does nothing at all.</helpText>
+            <helpText lang="de-DE">Hauptschalter für alles Folgende, auch für die Gleiche-Person-Prüfung. Wenn aus, tut das Plugin gar nichts.</helpText>
+            <helpText lang="pl-PL">Główny przełącznik dla wszystkiego poniżej, także dla kontroli tej samej osoby. Wyłączony = plugin nic nie robi.</helpText>
             <defaultValue>true</defaultValue>
         </input-field>
 
         <input-field type="single-select">
             <name>mode</name>
-            <label>Mode</label>
-            <label lang="de-DE">Modus</label>
-            <label lang="pl-PL">Tryb</label>
+            <label>Customer number protection mode</label>
+            <label lang="de-DE">Modus Kundennummern-Schutz</label>
+            <label lang="pl-PL">Tryb ochrony numeru klienta</label>
             <helpText>"Log only" records every attempt but changes nothing (use first on production to confirm detection). "Enforce" blocks connector changes to the customer number and assigns a number from the shop's own range to connector-created customers.</helpText>
             <helpText lang="de-DE">"Nur protokollieren" zeichnet jeden Versuch auf, ändert aber nichts (zuerst in Produktion verwenden). "Durchsetzen" blockiert Kundennummer-Änderungen des Connectors und vergibt für vom Connector angelegte Kunden eine Nummer aus dem Nummernkreis des Shops.</helpText>
             <helpText lang="pl-PL">"Tylko loguj" zapisuje każdą próbę, nic nie zmienia (użyj najpierw na produkcji). "Wymuszaj" blokuje zmiany numeru klienta przez connector i nadaje klientom tworzonym przez connector numer z własnego zakresu sklepu.</helpText>
@@ -43,27 +43,17 @@
             <defaultValue>log_only</defaultValue>
         </input-field>
 
-        <input-field type="text">
-            <name>integrationLabels</name>
-            <label>Connector integration label(s)</label>
-            <label lang="de-DE">Integrations-Bezeichnung(en) des Connectors</label>
-            <label lang="pl-PL">Nazwa/nazwy integracji connectora</label>
-            <helpText>Comma-separated labels of the Admin API integrations (Settings > System > Integrations) used by the JTL-Connector. Matched ignoring case, whitespace and punctuation (so "JTL Connector" and "JTL-Connector" are the same). Writes from any other integration, admin user or the storefront are never touched.</helpText>
-            <helpText lang="de-DE">Kommagetrennte Bezeichnungen der Admin-API-Integrationen (Einstellungen > System > Integrationen), die der JTL-Connector verwendet. Vergleich ignoriert Groß-/Kleinschreibung, Leerzeichen und Satzzeichen ("JTL Connector" und "JTL-Connector" sind gleich). Schreibvorgänge anderer Integrationen, Admin-Benutzer oder der Storefront werden nie angefasst.</helpText>
-            <helpText lang="pl-PL">Nazwy (po przecinku) integracji Admin API (Ustawienia > System > Integracje) używanych przez JTL-Connector. Porównanie ignoruje wielkość liter, spacje i znaki interpunkcyjne ("JTL Connector" i "JTL-Connector" to to samo). Zapisy innych integracji, użytkowników admina i storefrontu nigdy nie są modyfikowane.</helpText>
-            <placeholder>JTL-Connector</placeholder>
-            <defaultValue>JTL-Connector</defaultValue>
-        </input-field>
-
-        <input-field type="text">
+        <component name="sw-entity-multi-id-select">
             <name>integrationIds</name>
-            <label>Connector integration id(s) — optional</label>
-            <label lang="de-DE">Integrations-ID(s) des Connectors — optional</label>
-            <label lang="pl-PL">ID integracji connectora — opcjonalnie</label>
-            <helpText>Comma-separated 32-char hex ids of the integrations, if you prefer matching by id instead of (or in addition to) the label.</helpText>
-            <helpText lang="de-DE">Kommagetrennte 32-stellige Hex-IDs der Integrationen, falls statt (oder zusätzlich zur) Bezeichnung per ID zugeordnet werden soll.</helpText>
-            <helpText lang="pl-PL">32-znakowe identyfikatory hex integracji (po przecinku), jeśli wolisz dopasowanie po id zamiast (lub oprócz) nazwy.</helpText>
-        </input-field>
+            <entity>integration</entity>
+            <labelProperty>label</labelProperty>
+            <label>JTL-Connector integration (required)</label>
+            <label lang="de-DE">JTL-Connector-Integration (erforderlich)</label>
+            <label lang="pl-PL">Integracja JTL-Connectora (wymagane)</label>
+            <helpText>Select the Admin API integration (Settings > System > Integrations) the JTL-Connector uses. Only writes of the selected integration(s) are guarded. With nothing selected the plugin does NOTHING. The selection counts for the whole shop, whichever sales channel is selected above while saving. Writes from any other integration, admin user or the storefront are never touched.</helpText>
+            <helpText lang="de-DE">Die Admin-API-Integration (Einstellungen > System > Integrationen) auswählen, die der JTL-Connector verwendet. Nur Schreibvorgänge der ausgewählten Integration(en) werden geprüft. Ohne Auswahl tut das Plugin NICHTS. Die Auswahl gilt für den ganzen Shop, egal welcher Verkaufskanal beim Speichern oben gewählt ist. Schreibvorgänge anderer Integrationen, Admin-Benutzer oder der Storefront werden nie angefasst.</helpText>
+            <helpText lang="pl-PL">Wybierz integrację Admin API (Ustawienia > System > Integracje), której używa JTL-Connector. Kontrolowane są tylko zapisy wybranej integracji (lub kilku). Bez wyboru plugin NIC nie robi. Wybór obowiązuje dla całego sklepu, niezależnie od kanału sprzedaży zaznaczonego u góry przy zapisie. Zapisy innych integracji, użytkowników admina i storefrontu nigdy nie są modyfikowane.</helpText>
+        </component>
 
         <input-field type="text">
             <name>protectedFields</name>
@@ -79,29 +69,29 @@
     </card>
 
     <card>
-        <title>JTL-Connector Guard — customer identity protection</title>
-        <title lang="de-DE">JTL-Connector Guard — Kundenidentitäts-Schutz</title>
-        <title lang="pl-PL">JTL-Connector Guard — ochrona tożsamości klienta</title>
+        <title>JTL-Connector Guard — same-person check</title>
+        <title lang="de-DE">JTL-Connector Guard — Gleiche-Person-Prüfung</title>
+        <title lang="pl-PL">JTL-Connector Guard — kontrola tej samej osoby</title>
 
         <input-field type="bool">
-            <name>identityGuardEnabled</name>
-            <label>Identity guard enabled</label>
-            <label lang="de-DE">Identitätsschutz aktiv</label>
-            <label lang="pl-PL">Ochrona tożsamości włączona</label>
-            <helpText>Protects an existing customer's e-mail (and name, see below) from being replaced by the JTL-Connector. Independent of the customer-number guard above.</helpText>
-            <helpText lang="de-DE">Schützt E-Mail (und Name, siehe unten) eines bestehenden Kunden vor dem Überschreiben durch den JTL-Connector. Unabhängig vom Kundennummern-Schutz oben.</helpText>
-            <helpText lang="pl-PL">Chroni e-mail (i nazwisko, patrz niżej) istniejącego klienta przed nadpisaniem przez JTL-Connector. Niezależne od ochrony numeru klienta powyżej.</helpText>
+            <name>samePersonGuardEnabled</name>
+            <label>Same-person check enabled</label>
+            <label lang="de-DE">Gleiche-Person-Prüfung aktiv</label>
+            <label lang="pl-PL">Kontrola tej samej osoby włączona</label>
+            <helpText>JTL-Wawi may edit an existing customer (addresses, name, company, VAT id, group, ...) as long as its write carries the account's own e-mail. A write carrying a DIFFERENT e-mail is another customer being pushed onto this account: nothing of it is applied. The customer number stays protected by the first card.</helpText>
+            <helpText lang="de-DE">JTL-Wawi darf einen bestehenden Kunden bearbeiten (Adressen, Name, Firma, USt-IdNr., Kundengruppe, ...), solange der Schreibvorgang die E-Mail des Kontos enthält. Ein Schreibvorgang mit einer ANDEREN E-Mail ist ein anderer Kunde, der auf dieses Konto geschrieben wird: nichts davon wird übernommen. Die Kundennummer bleibt durch die erste Karte geschützt.</helpText>
+            <helpText lang="pl-PL">JTL-Wawi może edytować istniejącego klienta (adresy, nazwisko, firma, NIP, grupa, ...), o ile zapis zawiera e-mail tego konta. Zapis z INNYM e-mailem to inny klient nadpisujący to konto: nic z niego nie jest stosowane. Numer klienta nadal chroni pierwsza karta.</helpText>
             <defaultValue>true</defaultValue>
         </input-field>
 
         <input-field type="single-select">
-            <name>identityGuardMode</name>
-            <label>Identity guard mode</label>
-            <label lang="de-DE">Modus Identitätsschutz</label>
-            <label lang="pl-PL">Tryb ochrony tożsamości</label>
-            <helpText>"Log only" records every e-mail/name replacement but applies it (use first on production). "Enforce" keeps the current e-mail (and name per the policy below) and applies the rest of the connector's write.</helpText>
-            <helpText lang="de-DE">"Nur protokollieren" zeichnet jeden E-Mail-/Namenstausch auf, wendet ihn aber an (zuerst in Produktion verwenden). "Durchsetzen" behält die aktuelle E-Mail (und den Namen gemäß Regel unten) und wendet den Rest des Connector-Schreibvorgangs an.</helpText>
-            <helpText lang="pl-PL">"Tylko loguj" zapisuje każdą podmianę e-maila/nazwiska, ale ją stosuje (użyj najpierw na produkcji). "Wymuszaj" zachowuje obecny e-mail (i nazwisko wg reguły poniżej), a resztę zapisu connectora stosuje.</helpText>
+            <name>samePersonGuardMode</name>
+            <label>Same-person check mode</label>
+            <label lang="de-DE">Modus Gleiche-Person-Prüfung</label>
+            <label lang="pl-PL">Tryb kontroli tej samej osoby</label>
+            <helpText>"Log only" records every value a different-person write replaces, but applies it. "Enforce" keeps the account as it is. Writes for the same person are applied in both modes and are not logged.</helpText>
+            <helpText lang="de-DE">"Nur protokollieren" zeichnet jeden Wert auf, den ein Schreibvorgang für eine andere Person ersetzt, wendet ihn aber an. "Durchsetzen" lässt das Konto unverändert. Schreibvorgänge für dieselbe Person werden in beiden Modi angewendet und nicht protokolliert.</helpText>
+            <helpText lang="pl-PL">"Tylko loguj" zapisuje każdą wartość zastąpioną przez zapis dotyczący innej osoby, ale go stosuje. "Wymuszaj" pozostawia konto bez zmian. Zapisy dotyczące tej samej osoby są stosowane w obu trybach i nie są logowane.</helpText>
             <options>
                 <option>
                     <id>log_only</id>
@@ -119,111 +109,36 @@
             <defaultValue>log_only</defaultValue>
         </input-field>
 
-        <input-field type="single-select">
-            <name>identityGuardProtectName</name>
-            <label>Protect first/last name</label>
-            <label lang="de-DE">Vor-/Nachname schützen</label>
-            <label lang="pl-PL">Chroń imię/nazwisko</label>
-            <helpText>"Only with an e-mail swap" (default): the name is kept only when the same write also replaces the e-mail; a name-only change is logged as observed and applied. "Always": name changes are guarded like the e-mail. "Off": name changes are neither guarded nor logged.</helpText>
-            <helpText lang="de-DE">"Nur bei E-Mail-Tausch" (Standard): der Name wird nur behalten, wenn derselbe Schreibvorgang auch die E-Mail ersetzt; eine reine Namensänderung wird protokolliert und angewendet. "Immer": Namensänderungen werden wie die E-Mail geschützt. "Aus": Namensänderungen werden weder geschützt noch protokolliert.</helpText>
-            <helpText lang="pl-PL">"Tylko przy podmianie e-maila" (domyślnie): nazwisko jest zachowywane tylko, gdy ten sam zapis podmienia też e-mail; sama zmiana nazwiska jest logowana i stosowana. "Zawsze": zmiany nazwiska chronione jak e-mail. "Wyłączone": zmiany nazwiska nie są ani chronione, ani logowane.</helpText>
-            <options>
-                <option>
-                    <id>on_email_swap</id>
-                    <name>Only together with an e-mail swap</name>
-                    <name lang="de-DE">Nur zusammen mit E-Mail-Tausch</name>
-                    <name lang="pl-PL">Tylko razem z podmianą e-maila</name>
-                </option>
-                <option>
-                    <id>always</id>
-                    <name>Always</name>
-                    <name lang="de-DE">Immer</name>
-                    <name lang="pl-PL">Zawsze</name>
-                </option>
-                <option>
-                    <id>off</id>
-                    <name>Off</name>
-                    <name lang="de-DE">Aus</name>
-                    <name lang="pl-PL">Wyłączone</name>
-                </option>
-            </options>
-            <defaultValue>on_email_swap</defaultValue>
-        </input-field>
-    </card>
-
-    <card>
-        <title>JTL-Connector Guard — field allow-list (customer + address)</title>
-        <title lang="de-DE">JTL-Connector Guard — Feld-Freigabeliste (Kunde + Adresse)</title>
-        <title lang="pl-PL">JTL-Connector Guard — lista dozwolonych pól (klient + adres)</title>
-
         <input-field type="bool">
-            <name>fieldGuardEnabled</name>
-            <label>Field guard enabled</label>
-            <label lang="de-DE">Feldschutz aktiv</label>
-            <label lang="pl-PL">Ochrona pól włączona</label>
-            <helpText>On an existing customer the JTL-Connector may change only the allowed columns below; every other customer column, custom field and address column is kept (enforce) or recorded (log only). Independent of the two guards above.</helpText>
-            <helpText lang="de-DE">Bei bestehenden Kunden darf der JTL-Connector nur die unten freigegebenen Spalten ändern; alle anderen Kundenspalten, Zusatzfelder und Adressspalten werden behalten (Durchsetzen) bzw. protokolliert (Nur protokollieren). Unabhängig von den beiden Schutzfunktionen oben.</helpText>
-            <helpText lang="pl-PL">U istniejącego klienta JTL-Connector może zmieniać tylko dozwolone kolumny poniżej; każda inna kolumna klienta, pole dodatkowe i kolumna adresu jest zachowywana (Wymuszaj) lub zapisywana (Tylko loguj). Niezależne od dwóch ochron powyżej.</helpText>
+            <name>samePersonRerouteEnabled</name>
+            <label>Apply the change to the right account (by e-mail)</label>
+            <label lang="de-DE">Änderung auf das richtige Konto anwenden (per E-Mail)</label>
+            <label lang="pl-PL">Zastosuj zmianę na właściwym koncie (po e-mailu)</label>
+            <helpText>Enforce only. A write that was kept away from a foreign account is applied to the single REGISTERED account with the e-mail JTL-Wawi sent (guest accounts are ignored). If there is no such account, or more than one, nothing is written and the attempt is logged. Customer number and e-mail are never transferred.</helpText>
+            <helpText lang="de-DE">Nur im Modus Durchsetzen. Ein von einem fremden Konto ferngehaltener Schreibvorgang wird auf das einzige REGISTRIERTE Konto mit der von JTL-Wawi gesendeten E-Mail angewendet (Gastkonten werden ignoriert). Gibt es kein solches Konto oder mehrere, wird nichts geschrieben und der Versuch protokolliert. Kundennummer und E-Mail werden nie übertragen.</helpText>
+            <helpText lang="pl-PL">Tylko w trybie Wymuszaj. Zapis zablokowany na cudzym koncie jest stosowany na jedynym ZAREJESTROWANYM koncie z e-mailem przysłanym przez JTL-Wawi (konta gości są pomijane). Jeśli takiego konta nie ma albo jest ich kilka, nic nie jest zapisywane, a próba trafia do logu. Numer klienta i e-mail nigdy nie są przenoszone.</helpText>
             <defaultValue>true</defaultValue>
         </input-field>
 
-        <input-field type="single-select">
-            <name>fieldGuardMode</name>
-            <label>Field guard mode</label>
-            <label lang="de-DE">Modus Feldschutz</label>
-            <label lang="pl-PL">Tryb ochrony pól</label>
-            <helpText>"Log only" records every disallowed change with the value it replaced, but applies it (use first on production, for one or two months: the log is the repair source). "Enforce" keeps the current value and applies the rest of the connector's write.</helpText>
-            <helpText lang="de-DE">"Nur protokollieren" zeichnet jede nicht freigegebene Änderung samt dem ersetzten Wert auf, wendet sie aber an (zuerst in Produktion, ein bis zwei Monate: das Protokoll ist die Reparaturquelle). "Durchsetzen" behält den aktuellen Wert und wendet den Rest des Connector-Schreibvorgangs an.</helpText>
-            <helpText lang="pl-PL">"Tylko loguj" zapisuje każdą niedozwoloną zmianę razem z zastąpioną wartością, ale ją stosuje (użyj najpierw na produkcji, przez miesiąc lub dwa: log jest źródłem naprawy). "Wymuszaj" zachowuje obecną wartość, a resztę zapisu connectora stosuje.</helpText>
-            <options>
-                <option>
-                    <id>log_only</id>
-                    <name>Log only</name>
-                    <name lang="de-DE">Nur protokollieren</name>
-                    <name lang="pl-PL">Tylko loguj</name>
-                </option>
-                <option>
-                    <id>enforce</id>
-                    <name>Enforce</name>
-                    <name lang="de-DE">Durchsetzen</name>
-                    <name lang="pl-PL">Wymuszaj</name>
-                </option>
-            </options>
-            <defaultValue>log_only</defaultValue>
-        </input-field>
-
         <input-field type="text">
-            <name>allowedFields</name>
-            <label>Allowed customer columns</label>
-            <label lang="de-DE">Freigegebene Kundenspalten</label>
-            <label lang="pl-PL">Dozwolone kolumny klienta</label>
-            <helpText>Comma-separated storage column names of the customer table the connector MAY change on existing customers. "customer_group_id" is always allowed. Columns handled by the guards above (customer_number, email, first_name, last_name) keep their own rules.</helpText>
-            <helpText lang="de-DE">Kommagetrennte Spaltennamen der Kundentabelle, die der Connector bei bestehenden Kunden ändern DARF. "customer_group_id" ist immer freigegeben. Spalten der Schutzfunktionen oben (customer_number, email, first_name, last_name) behalten deren Regeln.</helpText>
-            <helpText lang="pl-PL">Nazwy kolumn tabeli klienta (po przecinku), które connector MOŻE zmieniać u istniejących klientów. "customer_group_id" jest dozwolone zawsze. Kolumny obsługiwane przez ochrony powyżej (customer_number, email, first_name, last_name) zachowują własne reguły.</helpText>
-            <placeholder>customer_group_id</placeholder>
-            <defaultValue>customer_group_id</defaultValue>
+            <name>samePersonRerouteFields</name>
+            <label>Columns applied to the right account</label>
+            <label lang="de-DE">Auf das richtige Konto angewendete Spalten</label>
+            <label lang="pl-PL">Kolumny stosowane na właściwym koncie</label>
+            <helpText>Comma-separated storage column names. Supported: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type.</helpText>
+            <helpText lang="de-DE">Kommagetrennte Spaltennamen. Unterstützt: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type.</helpText>
+            <helpText lang="pl-PL">Nazwy kolumn po przecinku. Obsługiwane: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type.</helpText>
+            <placeholder>customer_group_id,salutation_id,title,first_name,last_name,company,vat_ids</placeholder>
+            <defaultValue>customer_group_id,salutation_id,title,first_name,last_name,company,vat_ids</defaultValue>
         </input-field>
-
-        <input-field type="text">
-            <name>allowedCustomFields</name>
-            <label>Allowed customer custom-field keys</label>
-            <label lang="de-DE">Freigegebene Zusatzfeld-Schlüssel des Kunden</label>
-            <label lang="pl-PL">Dozwolone klucze pól dodatkowych klienta</label>
-            <helpText>Comma-separated custom field keys the connector may write on existing customers. Default: the two JTL-Wawi note fields. Enter "none" to allow no key at all.</helpText>
-            <helpText lang="de-DE">Kommagetrennte Zusatzfeld-Schlüssel, die der Connector bei bestehenden Kunden schreiben darf. Standard: die beiden JTL-Wawi-Bemerkungsfelder. "none" eingeben, um keinen Schlüssel freizugeben.</helpText>
-            <helpText lang="pl-PL">Klucze pól dodatkowych (po przecinku), które connector może zapisywać u istniejących klientów. Domyślnie: dwa pola uwag z JTL-Wawi. Wpisz "none", aby nie dopuścić żadnego klucza.</helpText>
-            <placeholder>anmerkung,hinweis_(intern)</placeholder>
-            <defaultValue>anmerkung,hinweis_(intern)</defaultValue>
-        </input-field>
-
         <input-field type="single-select">
             <name>addressCreateDeletePolicy</name>
             <label>Address create / delete by the connector</label>
             <label lang="de-DE">Adresse anlegen / löschen durch den Connector</label>
             <label lang="pl-PL">Dodanie / usunięcie adresu przez connector</label>
-            <helpText>A new or deleted address of an EXISTING customer cannot be dropped from the connector's write. "Record" lets it happen and logs every column (default). "Reject write" (enforce only) fails the whole connector write, i.e. every customer in that sync batch. Use only after the log shows it actually happens.</helpText>
-            <helpText lang="de-DE">Eine neue oder gelöschte Adresse eines BESTEHENDEN Kunden kann nicht aus dem Schreibvorgang des Connectors entfernt werden. "Protokollieren" lässt es zu und protokolliert jede Spalte (Standard). "Schreibvorgang ablehnen" (nur Durchsetzen) lässt den gesamten Connector-Schreibvorgang scheitern, also jeden Kunden dieses Sync-Pakets. Erst verwenden, wenn das Protokoll zeigt, dass es wirklich vorkommt.</helpText>
-            <helpText lang="pl-PL">Nowego lub usuniętego adresu ISTNIEJĄCEGO klienta nie da się usunąć z zapisu connectora. "Zapisz w logu" pozwala na to i loguje każdą kolumnę (domyślnie). "Odrzuć zapis" (tylko w trybie Wymuszaj) odrzuca cały zapis connectora, czyli każdego klienta z tej paczki synchronizacji. Używaj dopiero, gdy log pokaże, że to naprawdę się zdarza.</helpText>
+            <helpText>A different person's write that creates or deletes an address on the account cannot have that part removed. "Record" lets it happen and logs every column (default). "Reject write" (enforce only) fails the whole connector write, i.e. every customer in that sync batch. Use only after the log shows it actually happens. A delete of the account's DEFAULT address is always rejected in enforce, whatever is set here.</helpText>
+            <helpText lang="de-DE">Legt der Schreibvorgang einer anderen Person eine Adresse auf dem Konto an oder löscht eine, kann dieser Teil nicht entfernt werden. "Protokollieren" lässt es zu und protokolliert jede Spalte (Standard). "Schreibvorgang ablehnen" (nur Durchsetzen) lässt den gesamten Connector-Schreibvorgang scheitern, also jeden Kunden dieses Sync-Pakets. Erst verwenden, wenn das Protokoll zeigt, dass es wirklich vorkommt.</helpText>
+            <helpText lang="pl-PL">Jeśli zapis innej osoby tworzy lub usuwa adres na koncie, tej części nie da się usunąć z zapisu. "Zapisz w logu" pozwala na to i loguje każdą kolumnę (domyślnie). "Odrzuć zapis" (tylko w trybie Wymuszaj) odrzuca cały zapis connectora, czyli każdego klienta z tej paczki synchronizacji. Używaj dopiero, gdy log pokaże, że to naprawdę się zdarza.</helpText>
             <options>
                 <option>
                     <id>log</id>
