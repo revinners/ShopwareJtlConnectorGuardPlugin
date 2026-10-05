@@ -128,7 +128,7 @@ final class GuardConfigProviderTest extends TestCase
         $samePerson = $this->providerWith([])->load()->samePerson;
 
         self::assertTrue($samePerson->reroute);
-        self::assertSame(['customer_group_id', 'salutation_id', 'title', 'first_name', 'last_name', 'company', 'vat_ids'], $samePerson->rerouteFields);
+        self::assertSame(['customer_group_id', 'first_name', 'last_name', 'company'], $samePerson->rerouteFields);
         self::assertFalse($samePerson->reroutes(), 'log_only never reroutes');
     }
 

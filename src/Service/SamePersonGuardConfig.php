@@ -11,7 +11,12 @@ namespace Revinners\ShopwareJtlConnectorGuardPlugin\Service;
  */
 final readonly class SamePersonGuardConfig
 {
-    public const DEFAULT_REROUTE_FIELDS = ['customer_group_id', 'salutation_id', 'title', 'first_name', 'last_name', 'company', 'vat_ids'];
+    /**
+     * What the merchant actually edits in the ERP. Salutation, title and VAT ids are supported
+     * but not transferred by default: the connector sends them empty even when JTL-Wawi holds a
+     * value (seen on production with `vat_ids`).
+     */
+    public const DEFAULT_REROUTE_FIELDS = ['customer_group_id', 'first_name', 'last_name', 'company'];
 
     /** A new or deleted address in a different person's write cannot be dropped: record it (default). */
     public const POLICY_LOG = 'log';
