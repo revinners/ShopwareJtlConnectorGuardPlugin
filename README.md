@@ -113,7 +113,7 @@ The e-mail in the connector's write decides:
 | `samePersonGuardEnabled` | `true` | switch of the same-person check (the plugin's master switch is `enabled`, above) |
 | `samePersonGuardMode` | `log_only` | `log_only` = record and apply; `enforce` = keep the account as it is |
 | `samePersonRerouteEnabled` | `true` | enforce only: apply the kept write to the registered account with the e-mail it carried |
-| `samePersonRerouteFields` | `customer_group_id,salutation_id,title,first_name,last_name,company,vat_ids` | columns that are transferred (`account_type` is supported too) |
+| `samePersonRerouteFields` | `customer_group_id,first_name,last_name,company` | columns that are transferred. `salutation_id`, `title`, `vat_ids`, `account_type` are supported but off by default: the connector sends them empty even when Wawi holds a value |
 | `addressCreateDeletePolicy` | `log` | a different person's write that creates/deletes an address: `log` = record it; `reject_write` = fail the whole write (enforce only) |
 
 **Applied to the right account.** JTL-Wawi's data about the customer is correct; only the shop account
@@ -125,7 +125,9 @@ connector addressed. If no such account exists, or more than one, nothing is wri
 `reroute_skipped` row records the e-mail and the reason (`no_registered_account` /
 `several_registered_accounts` / `write_failed`). The target must carry exactly that e-mail (case and
 surrounding spaces aside) — the database's looser collation (`é` = `e`) is not trusted. Customer number
-and e-mail are never transferred. Guest accounts are never a target. This keeps group and master-data changes in the ERP working while the links are wrong.
+and e-mail are never transferred. Guest accounts are never a target. **An empty value in the write is never
+rerouted, so it cannot erase a value the target account has** — the connector does not send every field Wawi holds (seen on
+production: an empty VAT id list for a customer with a VAT id in Wawi). This keeps group and master-data changes in the ERP working while the links are wrong.
 
 Things to know:
 

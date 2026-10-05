@@ -1,7 +1,7 @@
 {
   "name": "revinners/shopware6-jtl-connector-guard",
   "description": "Guards Shopware data against unwanted overwrites by the JTL-Connector (JTL-Wawi): customer number write protection, plus a same-person check that lets JTL-Wawi edit a customer but never write one customer onto another customer's account.",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "type": "shopware-platform-plugin",
   "license": "proprietary",
   "authors": [

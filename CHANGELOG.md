@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1 — 2026-10-05
+
+- Fix: the reroute no longer transfers empty values, so the connector can no longer erase a value on the
+  target account (to clear a field, do it in the shop).
+  The connector does not send every field JTL-Wawi holds — on production it sent `vat_ids: []` for a
+  customer whose Wawi record has a VAT id, and the reroute copied that onto his real account (restored by
+  hand).
+- Default `samePersonRerouteFields` is now `customer_group_id,first_name,last_name,company`;
+  `salutation_id`, `title` and `vat_ids` stay supported but are off by default. A shop that already
+  saved the setting keeps its value — check it after updating.
+- 1.3.0 in production (yam-shop.de, 2026-10-05): verified with real pushes from JTL-Wawi in `log_only`
+  (`observed_mismatch`) and in `enforce` (foreign account untouched, change rerouted to the account with
+  the pushed e-mail, twice). The integration dropdown in the admin works and stores an id list.
+
 ## 1.3.0 — 2026-10-02
 
 - Feature 004: same-person check — replaces the "only the customer group may change" rule of 003, which

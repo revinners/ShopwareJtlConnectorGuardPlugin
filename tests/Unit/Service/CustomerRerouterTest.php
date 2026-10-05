@@ -49,7 +49,8 @@ final class CustomerRerouterTest extends TestCase
         $this->logger = $this->createMock(LoggerInterface::class);
         $this->rerouter = new CustomerRerouter($this->connection, $this->repository, $this->stateLoader, $this->guardLogger, $this->logger, $this->createMock(LoggerInterface::class));
         $this->connector = new ConnectorSource('2103c0f8ba934cbdb291287aaa3b5ce8', 'JTL-Connector');
-        $this->config = new SamePersonGuardConfig(true, true, true);
+        // every supported column, so the tests below exercise ids, scalars and JSON alike
+        $this->config = new SamePersonGuardConfig(true, true, true, CustomerRerouter::supportedColumns());
     }
 
     /** The foreign account the connector addressed. */
@@ -268,6 +269,63 @@ final class CustomerRerouterTest extends TestCase
         $this->repository->expects(self::once())->method('update');
 
         $this->rerouter->queue($this->hit(Uuid::randomHex()), $this->dealerPush(), $this->config, $this->connector);
+        $this->rerouter->flush();
+    }
+
+    public function testAnEmptyValueFromTheConnectorNeverErasesWhatTheAccountHas(): void
+    {
+        $target = Uuid::randomHex();
+        $this->connection->method('fetchAllAssociative')->willReturn([['id' => Uuid::fromHexToBytes($target), 'email' => 'dealer@example.com']]);
+        $this->stateLoader->method('load')->willReturn([$target => $this->target($target, ['title' => 'Dr.', 'salutation_id' => Uuid::randomBytes()])]);
+
+        // what production showed: the group changes, VAT ids / company / title / salutation arrive empty
+        $sent = ['email' => 'dealer@example.com', 'customer_group_id' => Uuid::fromHexToBytes(self::GROUP_DEALER), 'vat_ids' => '[]', 'company' => '', 'title' => null, 'salutation_id' => null, 'first_name' => '  '];
+        $this->repository->expects(self::once())->method('update')->with([['id' => $target, 'groupId' => self::GROUP_DEALER]], self::anything());
+
+        $this->rerouter->queue($this->hit(Uuid::randomHex()), $sent, $this->config, $this->connector);
+        $this->rerouter->flush();
+
+        self::assertSame([GuardLogEntry::ACTION_REROUTED], array_column($this->logged, 0));
+        self::assertSame('customer_group_id', $this->logged[0][1]);
+    }
+
+    public function testOnlyEmptyValuesMeansNoWriteAtAll(): void
+    {
+        $target = Uuid::randomHex();
+        $this->connection->method('fetchAllAssociative')->willReturn([['id' => Uuid::fromHexToBytes($target), 'email' => 'dealer@example.com']]);
+        $this->stateLoader->method('load')->willReturn([$target => $this->target($target)]);
+        $this->repository->expects(self::never())->method('update');
+
+        $this->rerouter->queue($this->hit(Uuid::randomHex()), ['email' => 'dealer@example.com', 'vat_ids' => '[]', 'company' => null], $this->config, $this->connector);
+        $this->rerouter->flush();
+
+        self::assertSame([], $this->logged);
+    }
+
+    public function testAnEmptyValueStillReplacesAnEmptyOneWithoutNoise(): void
+    {
+        $target = Uuid::randomHex();
+        $this->connection->method('fetchAllAssociative')->willReturn([['id' => Uuid::fromHexToBytes($target), 'email' => 'dealer@example.com']]);
+        $this->stateLoader->method('load')->willReturn([$target => $this->target($target, ['company' => null, 'vat_ids' => null])]);
+        $this->repository->expects(self::never())->method('update');
+
+        $this->rerouter->queue($this->hit(Uuid::randomHex()), ['email' => 'dealer@example.com', 'vat_ids' => '[]', 'company' => ''], $this->config, $this->connector);
+        $this->rerouter->flush();
+    }
+
+    public function testTheDefaultColumnsLeaveVatIdsSalutationAndTitleAlone(): void
+    {
+        self::assertSame(['customer_group_id', 'first_name', 'last_name', 'company'], SamePersonGuardConfig::DEFAULT_REROUTE_FIELDS);
+
+        $target = Uuid::randomHex();
+        $this->connection->method('fetchAllAssociative')->willReturn([['id' => Uuid::fromHexToBytes($target), 'email' => 'dealer@example.com']]);
+        $this->stateLoader->method('load')->willReturn([$target => $this->target($target)]);
+        $this->repository->expects(self::once())->method('update')->with(
+            [['id' => $target, 'groupId' => self::GROUP_DEALER, 'company' => 'Motorrad Dealer GmbH']],
+            self::anything(),
+        );
+
+        $this->rerouter->queue($this->hit(Uuid::randomHex()), $this->dealerPush(), new SamePersonGuardConfig(true, true, true), $this->connector);
         $this->rerouter->flush();
     }
 }

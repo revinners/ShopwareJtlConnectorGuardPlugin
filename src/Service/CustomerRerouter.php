@@ -184,6 +184,13 @@ final class CustomerRerouter implements EventSubscriberInterface, ResetInterface
             }
 
             [$property, $kind] = self::COLUMNS[$column];
+            // The connector does not send every field JTL-Wawi holds: an empty value in the write
+            // is "not transferred", not "delete it". It is never rerouted — it must not erase
+            // what the shop has, and writing empty over empty would only be noise.
+            if (self::isEmpty($kind, $attempted)) {
+                continue;
+            }
+
             $data[$property] = self::decode($kind, $attempted);
             $entries[] = $this->entry(
                 GuardLogEntry::ACTION_REROUTED,
@@ -214,6 +221,18 @@ final class CustomerRerouter implements EventSubscriberInterface, ResetInterface
         foreach ($entries as $entry) {
             $this->guardLogger->log($entry);
         }
+    }
+
+    private static function isEmpty(string $kind, mixed $value): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+        if ($kind === 'json') {
+            return (\is_array($value) ? $value : Values::decodeJson($value)) === [];
+        }
+
+        return \is_string($value) && trim($value) === '';
     }
 
     private static function decode(string $kind, mixed $value): mixed

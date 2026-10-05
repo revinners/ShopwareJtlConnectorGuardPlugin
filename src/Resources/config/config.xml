@@ -125,11 +125,11 @@
             <label>Columns applied to the right account</label>
             <label lang="de-DE">Auf das richtige Konto angewendete Spalten</label>
             <label lang="pl-PL">Kolumny stosowane na właściwym koncie</label>
-            <helpText>Comma-separated storage column names. Supported: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type.</helpText>
-            <helpText lang="de-DE">Kommagetrennte Spaltennamen. Unterstützt: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type.</helpText>
-            <helpText lang="pl-PL">Nazwy kolumn po przecinku. Obsługiwane: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type.</helpText>
-            <placeholder>customer_group_id,salutation_id,title,first_name,last_name,company,vat_ids</placeholder>
-            <defaultValue>customer_group_id,salutation_id,title,first_name,last_name,company,vat_ids</defaultValue>
+            <helpText>Comma-separated storage column names. Supported: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type. Add salutation_id, title or vat_ids only if you know the connector really sends them: it sends them empty even when JTL-Wawi holds a value. An empty value never replaces a value the shop account has.</helpText>
+            <helpText lang="de-DE">Kommagetrennte Spaltennamen. Unterstützt: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type. salutation_id, title oder vat_ids nur ergänzen, wenn der Connector sie wirklich sendet: er sendet sie leer, auch wenn JTL-Wawi einen Wert hat. Ein leerer Wert ersetzt nie einen vorhandenen Wert im Shop-Konto.</helpText>
+            <helpText lang="pl-PL">Nazwy kolumn po przecinku. Obsługiwane: customer_group_id, salutation_id, title, first_name, last_name, company, vat_ids, account_type. salutation_id, title i vat_ids dodawaj tylko, gdy connector naprawdę je wysyła: wysyła je puste, nawet gdy JTL-Wawi ma wartość. Pusta wartość nigdy nie zastępuje wartości, którą ma konto w sklepie.</helpText>
+            <placeholder>customer_group_id,first_name,last_name,company</placeholder>
+            <defaultValue>customer_group_id,first_name,last_name,company</defaultValue>
         </input-field>
         <input-field type="single-select">
             <name>addressCreateDeletePolicy</name>

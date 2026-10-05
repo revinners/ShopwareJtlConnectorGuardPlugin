@@ -64,6 +64,8 @@ ERP arrives nowhere — and the merchant wants to keep doing group and master-da
   nothing is written, one `reroute_skipped` row. Guest accounts are never a target.
 - **R9** Only columns listed in `samePersonRerouteFields` and supported by the plugin are transferred;
   never `customer_number`, never `email`. Only changed values are written and logged (`rerouted`).
+  An empty value in the write never replaces a non-empty value on the target (1.3.1): the connector sends
+  some fields empty although Wawi holds a value.
 - **R10** The reroute is queued from the write event's success callback (the connector's commands were
   executed without error) and applied on `kernel.response`, through the customer repository with a
   system context; a failure is logged (`reroute_skipped / write_failed`) and can never fail the
